@@ -18,12 +18,23 @@
       <p class="subtitle">On-device voice message transcription</p>
     </header>
 
-    <section id="model-section" class="model-section" hidden>
-      <p id="model-label">Loading German speech recognition model…</p>
-      <div class="progress-track">
-        <div id="progress-fill" class="progress-fill"></div>
+    <section id="model-section" class="model-section">
+      <div id="model-pick" class="model-pick">
+        <select id="model-select" aria-label="Speech recognition model">
+          <option value="german" selected>German fine-tune (large-v3-turbo) · ~250 MB</option>
+          <option value="tiny">Whisper Tiny · ~60 MB</option>
+          <option value="base">Whisper Base · ~110 MB</option>
+          <option value="small">Whisper Small · ~310 MB</option>
+        </select>
+        <button id="btn-load-model" class="btn btn-primary">Load model</button>
       </div>
-      <p id="model-detail" class="model-detail"></p>
+      <div id="model-progress" hidden>
+        <p id="model-label">Loading model…</p>
+        <div class="progress-track">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <p id="model-detail" class="model-detail"></p>
+      </div>
     </section>
 
     <section id="compat-section" class="compat-warning" hidden>
@@ -38,7 +49,7 @@
         <polyline points="2 12 5 12 5 8 8 8 8 16 11 16 11 4 14 4 14 20 17 20 17 12 20 12 22 12"/>
       </svg>
       <p class="drop-label">Drop a voice message here</p>
-      <p class="drop-hint" id="drop-hint">Loading model…</p>
+      <p class="drop-hint" id="drop-hint">Choose a model above to begin</p>
       <input id="file-input" type="file" accept="audio/*" hidden>
     </div>
 

@@ -1,7 +1,19 @@
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
 
+// ── Model config ─────────────────────────────────────────────────────────────
+const MODELS = {
+  german: { label: 'German fine-tune', id: 'onnx-community/whisper-large-v3-turbo-german-ONNX', dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' } },
+  tiny:   { label: 'Whisper Tiny',     id: 'onnx-community/whisper-tiny',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
+  base:   { label: 'Whisper Base',     id: 'onnx-community/whisper-base',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
+  small:  { label: 'Whisper Small',    id: 'onnx-community/whisper-small',                       dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
+};
+
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const modelSection  = document.getElementById('model-section');
+const modelPick     = document.getElementById('model-pick');
+const modelProgress = document.getElementById('model-progress');
+const modelSelectEl = document.getElementById('model-select');
+const btnLoadModel  = document.getElementById('btn-load-model');
 const modelLabel    = document.getElementById('model-label');
 const modelDetail   = document.getElementById('model-detail');
 const progressFill  = document.getElementById('progress-fill');
@@ -44,6 +56,7 @@ if (location.search.includes('shared=1')) {
       const blob = await response.blob();
       const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
       pendingSharedFile = new File([blob], name, { type: blob.type });
+      checkWasmSupport();  // auto-load when a file arrives via share target
     } catch (err) {
       console.error('Failed to retrieve shared file:', err);
     }
@@ -51,7 +64,7 @@ if (location.search.includes('shared=1')) {
 }
 
 // ── Model initialization ─────────────────────────────────────────────────────
-checkWasmSupport();
+btnLoadModel.addEventListener('click', checkWasmSupport);
 
 async function checkWasmSupport() {
   try {
@@ -65,16 +78,16 @@ async function checkWasmSupport() {
 }
 
 async function initModel() {
-  modelSection.hidden = false;
+  const model = MODELS[modelSelectEl.value] ?? MODELS.german;
+  modelPick.hidden = true;
+  modelProgress.hidden = false;
+  modelLabel.textContent = `Loading ${model.label}…`;
 
   try {
     transcriber = await pipeline(
       'automatic-speech-recognition',
-      'onnx-community/whisper-large-v3-turbo-german-ONNX',
-      {
-        dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' },
-        progress_callback: onModelProgress,
-      }
+      model.id,
+      { dtype: model.dtype, progress_callback: onModelProgress }
     );
 
     modelSection.hidden = true;
