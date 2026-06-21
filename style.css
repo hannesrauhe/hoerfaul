@@ -175,19 +175,8 @@ select {
 .status-text { color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
 .status-text.error { color: var(--danger); }
 
-/* Spinner & streaming cursor */
-@keyframes spin   { to { transform: rotate(360deg); } }
-@keyframes blink  { 50% { opacity: 0; } }
-.cursor {
-  display: inline-block;
-  width: 2px;
-  height: 0.85em;
-  background: currentColor;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  opacity: 0.5;
-  animation: blink 0.8s step-end infinite;
-}
+/* Spinner */
+@keyframes spin { to { transform: rotate(360deg); } }
 .spinner {
   display: inline-block;
   width: 14px;

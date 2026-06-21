@@ -33,7 +33,7 @@ const toastEl       = document.getElementById('toast');
 const STORAGE_KEY = 'hoerfaul-v1';
 let modelReady        = false;
 let modelLoading      = false;
-let activeXcription   = null;  // { id, entry, file, partial, resolve, reject }
+let activeXcription   = null;  // { id, entry, file, resolve, reject }
 let processing        = false;
 const pending         = [];
 const cards           = new Map();  // fileKey → { card, body }
@@ -87,17 +87,10 @@ worker.addEventListener('message', ({ data: msg }) => {
       modelProgress.hidden = true;
       modelLabel.textContent = `Failed to load model: ${msg.data}`;
       break;
-    case 'chunk':
-      if (activeXcription) {
-        activeXcription.partial += msg.data;
-        const t = activeXcription.partial.trim();
-        if (t) setCardBody(activeXcription.entry.body, 'streaming', t);
-      }
-      break;
     case 'done':
       if (activeXcription) {
-        const { id, entry, partial, file, resolve } = activeXcription;
-        const text = (msg.data ?? partial).trim() || '(no speech detected)';
+        const { id, entry, file, resolve } = activeXcription;
+        const text = (msg.data ?? '').trim() || '(no speech detected)';
         setCardBody(entry.body, 'done', text);
         if (cards.has(id)) persistTranscript(id, file.name, text);
         resolve();
@@ -237,7 +230,7 @@ async function transcribeFile(file, id) {
   try {
     const audio = await decodeAudio(file);
     await new Promise((resolve, reject) => {
-      activeXcription = { id, entry, file, partial: '', resolve, reject };
+      activeXcription = { id, entry, file, resolve, reject };
       worker.postMessage(
         { type: 'transcribe', audio, language: langSelect.value || null },
         [audio.buffer]  // transfer ownership — zero copy
@@ -307,13 +300,6 @@ function addCard(id, name, text) {
 }
 
 function setCardBody(body, state, detail) {
-  if (state === 'streaming') {
-    const existing = body.querySelector('.transcript');
-    if (existing?.firstChild) {
-      existing.firstChild.nodeValue = detail;
-      return;
-    }
-  }
   const p = document.createElement('p');
   switch (state) {
     case 'queued':
@@ -322,15 +308,6 @@ function setCardBody(body, state, detail) {
       const spinner = document.createElement('span');
       spinner.className = 'spinner';
       p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
-      break;
-    }
-    case 'streaming': {
-      p.className = 'transcript';
-      p.textContent = detail;
-      const cursor = document.createElement('span');
-      cursor.className = 'cursor';
-      cursor.setAttribute('aria-hidden', 'true');
-      p.append(cursor);
       break;
     }
     case 'done':
