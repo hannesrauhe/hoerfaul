@@ -14,6 +14,7 @@ const queueEl       = document.getElementById('queue');
 const toolbar       = document.getElementById('toolbar');
 const btnCopyAll    = document.getElementById('btn-copy-all');
 const btnClearAll   = document.getElementById('btn-clear-all');
+const langSelect    = document.getElementById('lang-select');
 const toastEl       = document.getElementById('toast');
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ async function initModel() {
   try {
     transcriber = await pipeline(
       'automatic-speech-recognition',
-      'onnx-community/whisper-tiny',
+      'onnx-community/whisper-base',
       {
         dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
         progress_callback: onModelProgress,
@@ -163,7 +164,8 @@ async function transcribeFile(file, id) {
   let url;
   try {
     url = URL.createObjectURL(file);
-    const result = await transcriber(url, { language: 'auto' });
+    const lang = langSelect.value || null;  // empty string = auto-detect
+    const result = await transcriber(url, { language: lang });
     const text = (result.text ?? '').trim() || '(no speech detected)';
     setCardBody(card, 'done', text);
     if (cards.has(id)) {  // skip if cleared during transcription
