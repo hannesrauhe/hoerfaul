@@ -27,8 +27,9 @@ self.addEventListener('message', async ({ data: msg }) => {
       }
       try {
         const result = await transcriber(
-          { data: msg.audio, sampling_rate: 16000 },
+          msg.audio,
           {
+            sampling_rate: 16000,
             language: msg.language,
             chunk_length_s: 20,
             stride_length_s: 3,
