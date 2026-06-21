@@ -70,7 +70,7 @@ async function initModel() {
   try {
     transcriber = await pipeline(
       'automatic-speech-recognition',
-      'onnx-community/whisper-base',
+      'onnx-community/whisper-large-v3-turbo-german-ONNX',
       {
         dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
         progress_callback: onModelProgress,
