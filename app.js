@@ -14,6 +14,22 @@ const SUMM_MODELS = {
   gemma270m: { label: 'Gemma 3 270M (WASM)',  id: 'onnx-community/gemma-3-270m-it-ONNX', device: 'wasm',   dtype: 'fp32',  requiresWebGPU: false },
 };
 
+const SUMM_PROMPTS = {
+  german:     'Fasse diese Sprachnachricht in 2–3 Sätzen zusammen:\n\n',
+  english:    'Summarize this voice message transcript in 2–3 sentences:\n\n',
+  french:     'Résume ce message vocal en 2–3 phrases :\n\n',
+  spanish:    'Resume este mensaje de voz en 2–3 oraciones:\n\n',
+  italian:    'Riassumi questo messaggio vocale in 2–3 frasi:\n\n',
+  dutch:      'Vat dit voicebericht samen in 2–3 zinnen:\n\n',
+  polish:     'Podsumuj tę wiadomość głosową w 2–3 zdaniach:\n\n',
+  portuguese: 'Resuma esta mensagem de voz em 2–3 frases:\n\n',
+  russian:    'Кратко изложи это голосовое сообщение в 2–3 предложениях:\n\n',
+  turkish:    'Bu sesli mesajı 2–3 cümlede özetle:\n\n',
+  arabic:     'لخّص هذه الرسالة الصوتية في 2–3 جمل:\n\n',
+  japanese:   'この音声メッセージを2〜3文で要約してください：\n\n',
+  chinese:    '请用2-3句话总结这段语音消息：\n\n',
+};
+
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const modelSection  = document.getElementById('model-section');
 const modelPick     = document.getElementById('model-pick');
@@ -158,9 +174,10 @@ async function ensureSummarizer(modelKey, onStatus) {
   return pipe;
 }
 
-async function summarizeText(pipe, text) {
+async function summarizeText(pipe, text, lang) {
+  const prompt = (SUMM_PROMPTS[lang] ?? SUMM_PROMPTS.english) + text;
   const output = await pipe(
-    [{ role: 'user', content: `Summarize this voice message transcript in 2–3 sentences:\n\n${text}` }],
+    [{ role: 'user', content: prompt }],
     { max_new_tokens: 200, do_sample: false }
   );
   return output[0].generated_text.at(-1).content.trim();
@@ -363,7 +380,7 @@ queueEl.addEventListener('click', async e => {
   try {
     const pipe = await ensureSummarizer(modelKey, msg => { btn.textContent = msg; });
     btn.textContent = 'Summarizing…';
-    const summary = await summarizeText(pipe, transcript);
+    const summary = await summarizeText(pipe, transcript, langSelect.value);
     appendSummary(entry.body, summary);
     const saved = savedTranscripts.find(t => t.id === id);
     if (saved) {
