@@ -80,8 +80,9 @@ async function checkWasmSupport() {
 async function initModel() {
   const model = MODELS[modelSelectEl.value] ?? MODELS.german;
   modelPick.hidden = true;
-  modelProgress.hidden = false;
+  modelLabel.hidden = false;
   modelLabel.textContent = `Loading ${model.label}…`;
+  modelProgress.hidden = false;
 
   try {
     transcriber = await pipeline(
@@ -90,11 +91,12 @@ async function initModel() {
       { dtype: model.dtype, progress_callback: onModelProgress }
     );
 
-    modelSection.hidden = true;
+    modelProgress.hidden = true;
+    modelLabel.textContent = 'Model loaded';
     enableDropZone();
   } catch (err) {
-    modelLabel.textContent = 'Failed to load model.';
-    modelDetail.textContent = err.message;
+    modelProgress.hidden = true;
+    modelLabel.textContent = `Failed to load model: ${err.message}`;
     console.error(err);
   }
 }

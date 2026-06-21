@@ -54,7 +54,7 @@ h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
 .model-section { display: flex; flex-direction: column; gap: 0.5rem; }
 .model-pick { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .model-pick select { flex: 1; min-width: 0; }
-#model-label { font-size: 0.9rem; color: var(--muted); }
+.model-status { font-size: 0.9rem; color: var(--muted); }
 
 .progress-track {
   height: 4px;
