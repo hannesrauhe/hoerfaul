@@ -72,10 +72,11 @@
       return;
     }
 
+    const swSrc = document.currentScript.src; // capture before any async boundary
     const alreadyReloaded = sessionStorage.getItem(RELOAD_KEY);
 
     navigator.serviceWorker
-      .register(document.currentScript.src)
+      .register(swSrc)
       .then(reg => {
         if (alreadyReloaded) {
           sessionStorage.removeItem(RELOAD_KEY);

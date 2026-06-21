@@ -26,9 +26,9 @@ const cards     = new Map();  // fileKey → <article> element
 let pendingSharedFile = null; // file received via Web Share Target, queued until model ready
 
 // ── Restore saved transcripts from previous session ──────────────────────────
-const saved = loadSaved();
-if (saved.length > 0) {
-  saved.forEach(({ id, name, text }) => addCard(id, name, text));
+let savedTranscripts = loadSaved();
+if (savedTranscripts.length > 0) {
+  savedTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
   toolbar.hidden = false;
 }
 
@@ -179,10 +179,10 @@ async function drainQueue() {
 }
 
 async function transcribeFile(file, id) {
-  const card = cards.get(id);
-  if (!card) return;
+  const entry = cards.get(id);
+  if (!entry) return;
 
-  setCardBody(card, 'working');
+  setCardBody(entry.body, 'working');
 
   let url;
   try {
@@ -190,12 +190,12 @@ async function transcribeFile(file, id) {
     const lang = langSelect.value || null;  // empty string = auto-detect
     const result = await transcriber(url, { language: lang });
     const text = (result.text ?? '').trim() || '(no speech detected)';
-    setCardBody(card, 'done', text);
+    setCardBody(entry.body, 'done', text);
     if (cards.has(id)) {  // skip if cleared during transcription
       persistTranscript(id, file.name, text);
     }
   } catch (err) {
-    setCardBody(card, 'error', err.message);
+    setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
     if (url) URL.revokeObjectURL(url);
@@ -225,7 +225,7 @@ function addCard(id, name, text) {
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
   </svg>`;
   copyBtn.addEventListener('click', () => {
-    const t = card.querySelector('.transcript');
+    const t = body.querySelector('.transcript');
     if (t) copyText(t.textContent);
   });
 
@@ -238,33 +238,33 @@ function addCard(id, name, text) {
   card.appendChild(header);
   card.appendChild(body);
 
-  cards.set(id, card);
+  cards.set(id, { card, body });
   queueEl.appendChild(card);
 
-  // Set initial body state
-  if (text !== null) {
-    setCardBody(card, 'done', text);
-  } else {
-    setCardBody(card, 'queued');
-  }
+  setCardBody(body, text !== null ? 'done' : 'queued', text ?? undefined);
 }
 
-function setCardBody(card, state, detail) {
-  const body = card.querySelector('.card-body');
+function setCardBody(body, state, detail) {
+  const p = document.createElement('p');
   switch (state) {
     case 'queued':
-      body.innerHTML = '<p class="status-text"><span class="spinner"></span> Waiting…</p>';
+    case 'working': {
+      p.className = 'status-text';
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
       break;
-    case 'working':
-      body.innerHTML = '<p class="status-text"><span class="spinner"></span> Transcribing…</p>';
-      break;
+    }
     case 'done':
-      body.innerHTML = `<p class="transcript">${escapeHtml(detail)}</p>`;
+      p.className = 'transcript';
+      p.textContent = detail;
       break;
     case 'error':
-      body.innerHTML = `<p class="status-text error">Error: ${escapeHtml(detail)}</p>`;
+      p.className = 'status-text error';
+      p.textContent = `Error: ${detail}`;
       break;
   }
+  body.replaceChildren(p);
 }
 
 // ── Toolbar actions ──────────────────────────────────────────────────────────
@@ -277,6 +277,7 @@ btnCopyAll.addEventListener('click', () => {
 
 btnClearAll.addEventListener('click', () => {
   pending.length = 0;
+  savedTranscripts = [];
   queueEl.innerHTML = '';
   cards.clear();
   toolbar.hidden = true;
@@ -289,16 +290,7 @@ async function copyText(text) {
     await navigator.clipboard.writeText(text);
     showToast('Copied');
   } catch {
-    // Fallback for insecure contexts
-    const ta = Object.assign(document.createElement('textarea'), {
-      value: text,
-      style: 'position:fixed;opacity:0',
-    });
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    showToast('Copied');
+    showToast('Copy failed');
   }
 }
 
@@ -328,26 +320,16 @@ function loadSaved() {
 
 function persistTranscript(id, name, text) {
   try {
-    const list = loadSaved();
-    const idx = list.findIndex(t => t.id === id);
+    const idx = savedTranscripts.findIndex(t => t.id === id);
     if (idx >= 0) {
-      list[idx] = { id, name, text };
+      savedTranscripts[idx] = { id, name, text };
     } else {
-      list.push({ id, name, text });
+      savedTranscripts.push({ id, name, text });
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedTranscripts));
   } catch {
     // localStorage unavailable (private mode quota, etc.) — silently skip
   }
-}
-
-// ── Utilities ────────────────────────────────────────────────────────────────
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 // ── Future: summarize with LLM API ───────────────────────────────────────────
