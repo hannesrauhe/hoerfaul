@@ -81,7 +81,7 @@ function onModelProgress(info) {
 function enableDropZone() {
   dropZone.classList.add('ready');
   dropZone.setAttribute('aria-disabled', 'false');
-  dropHint.textContent = 'tap to choose files · or drag & drop';
+  dropHint.textContent = 'tap to choose a file · or drag & drop';
 }
 
 function showCompat(msg) {
@@ -115,8 +115,8 @@ dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
   if (!transcriber) return;
-  const files = [...e.dataTransfer.files].filter(isAudio);
-  if (files.length) handleFiles(files);
+  const file = [...e.dataTransfer.files].find(isAudio);
+  if (file) handleFiles([file]);
 });
 
 function isAudio(file) {
@@ -125,12 +125,17 @@ function isAudio(file) {
 
 // ── File handling ────────────────────────────────────────────────────────────
 function handleFiles(files) {
-  files.forEach(file => {
-    const id = fileKey(file);
-    if (cards.has(id)) return;  // already present (same name+size)
-    pending.push({ file, id });
-    addCard(id, file.name, null);
-  });
+  const file = files[0];
+  if (!file) return;
+
+  const id = fileKey(file);
+  if (cards.has(id)) {
+    showToast('Already in list');
+    return;
+  }
+
+  pending.push({ file, id });
+  addCard(id, file.name, null);
   toolbar.hidden = false;
   drainQueue();
 }
@@ -159,9 +164,11 @@ async function transcribeFile(file, id) {
   try {
     url = URL.createObjectURL(file);
     const result = await transcriber(url, { language: 'auto' });
-    const text = result.text.trim();
+    const text = (result.text ?? '').trim() || '(no speech detected)';
     setCardBody(card, 'done', text);
-    persistTranscript(id, file.name, text);
+    if (cards.has(id)) {  // skip if cleared during transcription
+      persistTranscript(id, file.name, text);
+    }
   } catch (err) {
     setCardBody(card, 'error', err.message);
     console.error(err);
@@ -244,6 +251,7 @@ btnCopyAll.addEventListener('click', () => {
 });
 
 btnClearAll.addEventListener('click', () => {
+  pending.length = 0;
   queueEl.innerHTML = '';
   cards.clear();
   toolbar.hidden = true;
@@ -280,17 +288,29 @@ function showToast(msg) {
 
 // ── Persistence ──────────────────────────────────────────────────────────────
 function loadSaved() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]'); }
-  catch { return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(e =>
+      e !== null &&
+      typeof e === 'object' &&
+      typeof e.id === 'string' &&
+      typeof e.name === 'string' &&
+      typeof e.text === 'string'
+    );
+  } catch { return []; }
 }
 
 function persistTranscript(id, name, text) {
   try {
     const list = loadSaved();
-    if (!list.find(t => t.id === id)) {
+    const idx = list.findIndex(t => t.id === id);
+    if (idx >= 0) {
+      list[idx] = { id, name, text };
+    } else {
       list.push({ id, name, text });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
     }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
   } catch {
     // localStorage unavailable (private mode quota, etc.) — silently skip
   }
