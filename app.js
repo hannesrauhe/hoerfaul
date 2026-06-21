@@ -226,18 +226,31 @@ async function transcribeFile(file, id) {
 
   setCardBody(entry.body, 'working');
 
-  const url = URL.createObjectURL(file);
   try {
+    const audio = await decodeAudio(file);
     await new Promise((resolve, reject) => {
       activeXcription = { id, entry, file, partial: '', resolve, reject };
-      worker.postMessage({ type: 'transcribe', url, language: langSelect.value || null });
+      worker.postMessage(
+        { type: 'transcribe', audio, language: langSelect.value || null },
+        [audio.buffer]  // transfer ownership — zero copy
+      );
     });
   } catch (err) {
+    setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
-    URL.revokeObjectURL(url);
     activeXcription = null;
   }
+}
+
+function decodeAudio(file) {
+  return file.arrayBuffer().then(buf => {
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    return ctx.decodeAudioData(buf).then(ab => {
+      ctx.close();
+      return ab.getChannelData(0);  // mono Float32Array at 16 kHz
+    });
+  });
 }
 
 // ── Card rendering ───────────────────────────────────────────────────────────

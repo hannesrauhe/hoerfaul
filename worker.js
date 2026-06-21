@@ -22,14 +22,17 @@ self.addEventListener('message', async ({ data: msg }) => {
     }
     case 'transcribe': {
       try {
-        const result = await transcriber(msg.url, {
-          language: msg.language,
-          chunk_length_s: 20,
-          stride_length_s: 3,
-          chunk_callback: (chunk) => {
-            self.postMessage({ type: 'chunk', data: chunk.text });
-          },
-        });
+        const result = await transcriber(
+          { data: msg.audio, sampling_rate: 16000 },
+          {
+            language: msg.language,
+            chunk_length_s: 20,
+            stride_length_s: 3,
+            chunk_callback: (chunk) => {
+              self.postMessage({ type: 'chunk', data: chunk.text });
+            },
+          }
+        );
         self.postMessage({ type: 'done', data: result.text });
       } catch (err) {
         self.postMessage({ type: 'transcribe-error', data: err.message });
