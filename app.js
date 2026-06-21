@@ -23,12 +23,31 @@ let transcriber = null;
 let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
+let pendingSharedFile = null; // file received via Web Share Target, queued until model ready
 
 // ── Restore saved transcripts from previous session ──────────────────────────
 const saved = loadSaved();
 if (saved.length > 0) {
   saved.forEach(({ id, name, text }) => addCard(id, name, text));
   toolbar.hidden = false;
+}
+
+// ── Web Share Target: retrieve file stashed by the service worker ─────────────
+if (location.search.includes('shared=1')) {
+  history.replaceState({}, '', location.pathname);
+  (async () => {
+    try {
+      const cache = await caches.open('hoerfaul-share');
+      const response = await cache.match('shared-file');
+      if (!response) return;
+      await cache.delete('shared-file');
+      const blob = await response.blob();
+      const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
+      pendingSharedFile = new File([blob], name, { type: blob.type });
+    } catch (err) {
+      console.error('Failed to retrieve shared file:', err);
+    }
+  })();
 }
 
 // ── Model initialization ─────────────────────────────────────────────────────
@@ -83,6 +102,10 @@ function enableDropZone() {
   dropZone.classList.add('ready');
   dropZone.setAttribute('aria-disabled', 'false');
   dropHint.textContent = 'tap to choose a file · or drag & drop';
+  if (pendingSharedFile) {
+    handleFiles([pendingSharedFile]);
+    pendingSharedFile = null;
+  }
 }
 
 function showCompat(msg) {
