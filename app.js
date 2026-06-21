@@ -1,4 +1,4 @@
-import { pipeline, TextStreamer } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -202,21 +202,22 @@ async function transcribeFile(file, id) {
   const timer = setInterval(() => setCardBody(entry.body, 'working', ++elapsed), 1000);
 
   let partial = '';
-  const streamer = new TextStreamer(transcriber.tokenizer, {
-    skip_prompt: true,
-    skip_special_tokens: true,
-    callback_function: (token) => {
-      clearInterval(timer);
-      partial += token;
-      setCardBody(entry.body, 'streaming', partial);
-    },
-  });
-
   let url;
   try {
     url = URL.createObjectURL(file);
     const lang = langSelect.value || null;
-    const result = await transcriber(url, { language: lang, streamer });
+    const result = await transcriber(url, {
+      language: lang,
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      chunk_callback: (chunk) => {
+        partial += chunk.text;
+        if (partial.trim()) {
+          clearInterval(timer);
+          setCardBody(entry.body, 'streaming', partial.trim());
+        }
+      },
+    });
     clearInterval(timer);
     const text = (result.text ?? partial).trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
