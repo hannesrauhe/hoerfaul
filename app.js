@@ -1,4 +1,4 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+import { pipeline, TextStreamer } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -197,19 +197,32 @@ async function transcribeFile(file, id) {
   const entry = cards.get(id);
   if (!entry) return;
 
-  setCardBody(entry.body, 'working');
+  let elapsed = 0;
+  setCardBody(entry.body, 'working', elapsed);
+  const timer = setInterval(() => setCardBody(entry.body, 'working', ++elapsed), 1000);
+
+  let partial = '';
+  const streamer = new TextStreamer(transcriber.tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: true,
+    callback_function: (token) => {
+      clearInterval(timer);
+      partial += token;
+      setCardBody(entry.body, 'streaming', partial);
+    },
+  });
 
   let url;
   try {
     url = URL.createObjectURL(file);
-    const lang = langSelect.value || null;  // empty string = auto-detect
-    const result = await transcriber(url, { language: lang });
-    const text = (result.text ?? '').trim() || '(no speech detected)';
+    const lang = langSelect.value || null;
+    const result = await transcriber(url, { language: lang, streamer });
+    clearInterval(timer);
+    const text = (result.text ?? partial).trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
-    if (cards.has(id)) {  // skip if cleared during transcription
-      persistTranscript(id, file.name, text);
-    }
+    if (cards.has(id)) persistTranscript(id, file.name, text);
   } catch (err) {
+    clearInterval(timer);
     setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
@@ -262,12 +275,27 @@ function addCard(id, name, text) {
 function setCardBody(body, state, detail) {
   const p = document.createElement('p');
   switch (state) {
-    case 'queued':
+    case 'queued': {
+      p.className = 'status-text';
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      p.append(spinner, ' Waiting…');
+      break;
+    }
     case 'working': {
       p.className = 'status-text';
       const spinner = document.createElement('span');
       spinner.className = 'spinner';
-      p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
+      p.append(spinner, ` Transcribing… ${fmtElapsed(detail ?? 0)}`);
+      break;
+    }
+    case 'streaming': {
+      p.className = 'transcript';
+      p.textContent = detail;
+      const cursor = document.createElement('span');
+      cursor.className = 'cursor';
+      cursor.setAttribute('aria-hidden', 'true');
+      p.append(cursor);
       break;
     }
     case 'done':
@@ -280,6 +308,10 @@ function setCardBody(body, state, detail) {
       break;
   }
   body.replaceChildren(p);
+}
+
+function fmtElapsed(secs) {
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 }
 
 // ── Toolbar actions ──────────────────────────────────────────────────────────
