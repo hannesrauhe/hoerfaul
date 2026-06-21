@@ -254,10 +254,13 @@ async function transcribeFile(file, id) {
 function decodeAudio(file) {
   return file.arrayBuffer().then(buf => {
     const ctx = new AudioContext({ sampleRate: 16000 });
-    return ctx.decodeAudioData(buf).then(
-      ab => { ctx.close(); return ab.getChannelData(0); },
-      err => { ctx.close(); throw err; }
-    );
+    return ctx.decodeAudioData(buf).then(ab => {
+      ctx.close();
+      return new Float32Array(ab.getChannelData(0));
+    }).catch(err => {
+      ctx.close();
+      throw err;
+    });
   });
 }
 
