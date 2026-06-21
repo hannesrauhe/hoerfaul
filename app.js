@@ -203,7 +203,7 @@ async function transcribeFile(file, id) {
   try {
     url = URL.createObjectURL(file);
     const lang = langSelect.value || null;  // empty string = auto-detect
-    const result = await transcriber(url, { language: lang });
+    const result = await transcriber(url, { language: lang, chunk_length_s: 30, stride_length_s: 5 });
     const text = (result.text ?? '').trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
     if (cards.has(id)) {  // skip if cleared during transcription
