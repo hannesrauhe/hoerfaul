@@ -197,9 +197,7 @@ async function transcribeFile(file, id) {
   const entry = cards.get(id);
   if (!entry) return;
 
-  let elapsed = 0;
-  setCardBody(entry.body, 'working', elapsed);
-  const timer = setInterval(() => setCardBody(entry.body, 'working', ++elapsed), 1000);
+  setCardBody(entry.body, 'working');
 
   let partial = '';
   let url;
@@ -208,22 +206,17 @@ async function transcribeFile(file, id) {
     const lang = langSelect.value || null;
     const result = await transcriber(url, {
       language: lang,
-      chunk_length_s: 30,
-      stride_length_s: 5,
+      chunk_length_s: 20,
+      stride_length_s: 3,
       chunk_callback: (chunk) => {
         partial += chunk.text;
-        if (partial.trim()) {
-          clearInterval(timer);
-          setCardBody(entry.body, 'streaming', partial.trim());
-        }
+        if (partial.trim()) setCardBody(entry.body, 'streaming', partial.trim());
       },
     });
-    clearInterval(timer);
     const text = (result.text ?? partial).trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
     if (cards.has(id)) persistTranscript(id, file.name, text);
   } catch (err) {
-    clearInterval(timer);
     setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
@@ -276,18 +269,12 @@ function addCard(id, name, text) {
 function setCardBody(body, state, detail) {
   const p = document.createElement('p');
   switch (state) {
-    case 'queued': {
-      p.className = 'status-text';
-      const spinner = document.createElement('span');
-      spinner.className = 'spinner';
-      p.append(spinner, ' Waiting…');
-      break;
-    }
+    case 'queued':
     case 'working': {
       p.className = 'status-text';
       const spinner = document.createElement('span');
       spinner.className = 'spinner';
-      p.append(spinner, ` Transcribing… ${fmtElapsed(detail ?? 0)}`);
+      p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
       break;
     }
     case 'streaming': {
@@ -309,10 +296,6 @@ function setCardBody(body, state, detail) {
       break;
   }
   body.replaceChildren(p);
-}
-
-function fmtElapsed(secs) {
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 }
 
 // ── Toolbar actions ──────────────────────────────────────────────────────────
