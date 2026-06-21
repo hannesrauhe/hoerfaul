@@ -16,12 +16,13 @@
       // ── Web Share Target: receive audio files from the OS share sheet ───────
       if (req.method === "POST" && new URL(req.url).pathname.endsWith("/share-target")) {
         e.respondWith((async () => {
+          const shareKey = "share-" + Date.now();
           try {
             const data = await req.formData();
             const file = data.get("audio");
             if (file instanceof File) {
               const cache = await caches.open("hoerfaul-share");
-              await cache.put("shared-file", new Response(file, {
+              await cache.put(shareKey, new Response(file, {
                 headers: {
                   "Content-Type": file.type || "audio/ogg",
                   "X-File-Name": encodeURIComponent(file.name),
@@ -31,7 +32,7 @@
           } catch (err) {
             console.error("share-target handler failed:", err);
           }
-          return Response.redirect(new URL("./?shared=1", req.url).href, 303);
+          return Response.redirect(new URL("./?shared=" + shareKey, req.url).href, 303);
         })());
         return;
       }

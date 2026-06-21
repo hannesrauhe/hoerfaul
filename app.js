@@ -32,6 +32,7 @@ const toastEl       = document.getElementById('toast');
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
 let modelReady        = false;
+let modelLoading      = false;
 let activeXcription   = null;  // { id, entry, file, partial, resolve, reject }
 let processing        = false;
 const pending         = [];
@@ -39,25 +40,29 @@ const cards           = new Map();  // fileKey → { card, body }
 let pendingSharedFile = null;
 
 // ── Restore saved transcripts from previous session ──────────────────────────
-let savedTranscripts = loadSaved();
-if (savedTranscripts.length > 0) {
-  savedTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
+const restoredTranscripts = loadSaved();
+if (restoredTranscripts.length > 0) {
+  restoredTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
   toolbar.hidden = false;
 }
 
 // ── Web Share Target: retrieve file stashed by the service worker ─────────────
-if (location.search.includes('shared=1')) {
+const sharedKey = new URLSearchParams(location.search).get('shared');
+if (sharedKey) {
   history.replaceState({}, '', location.pathname);
   (async () => {
     try {
       const cache = await caches.open('hoerfaul-share');
-      const response = await cache.match('shared-file');
+      const response = await cache.match(sharedKey);
       if (!response) return;
-      await cache.delete('shared-file');
+      await cache.delete(sharedKey);
       const blob = await response.blob();
       const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
       pendingSharedFile = new File([blob], name, { type: blob.type });
-      checkWasmSupport();  // auto-load when a file arrives via share target
+      if (modelReady) {
+        handleFile(pendingSharedFile);
+        pendingSharedFile = null;
+      }
     } catch (err) {
       console.error('Failed to retrieve shared file:', err);
     }
@@ -72,11 +77,13 @@ worker.addEventListener('message', ({ data: msg }) => {
       break;
     case 'ready':
       modelReady = true;
+      modelLoading = false;
       modelProgress.hidden = true;
       modelLabel.textContent = 'Model loaded';
       enableDropZone();
       break;
     case 'model-error':
+      modelLoading = false;
       modelProgress.hidden = true;
       modelLabel.textContent = `Failed to load model: ${msg.data}`;
       break;
@@ -120,6 +127,8 @@ async function checkWasmSupport() {
 }
 
 function initModel() {
+  if (modelReady || modelLoading) return;
+  modelLoading = true;
   const model = MODELS[modelSelectEl.value] ?? MODELS.german;
   modelPick.hidden = true;
   modelLabel.hidden = false;
@@ -145,7 +154,7 @@ function enableDropZone() {
   dropZone.setAttribute('aria-disabled', 'false');
   dropHint.textContent = 'tap to choose a file · or drag & drop';
   if (pendingSharedFile) {
-    handleFiles([pendingSharedFile]);
+    handleFile(pendingSharedFile);
     pendingSharedFile = null;
   }
 }
@@ -165,7 +174,7 @@ dropZone.addEventListener('keydown', e => {
 });
 
 fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) handleFiles([...fileInput.files]);
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
   fileInput.value = '';
 });
 
@@ -182,7 +191,7 @@ dropZone.addEventListener('drop', e => {
   dropZone.classList.remove('drag-over');
   if (!modelReady) return;
   const file = [...e.dataTransfer.files].find(isAudio);
-  if (file) handleFiles([file]);
+  if (file) handleFile(file);
 });
 
 function isAudio(file) {
@@ -190,9 +199,8 @@ function isAudio(file) {
 }
 
 // ── File handling ────────────────────────────────────────────────────────────
-function handleFiles(files) {
-  const file = files[0];
-  if (!file) return;
+function handleFile(file) {
+  if (!file || !isAudio(file)) return;
 
   const id = fileKey(file);
   if (cards.has(id)) {
@@ -246,10 +254,10 @@ async function transcribeFile(file, id) {
 function decodeAudio(file) {
   return file.arrayBuffer().then(buf => {
     const ctx = new AudioContext({ sampleRate: 16000 });
-    return ctx.decodeAudioData(buf).then(ab => {
-      ctx.close();
-      return ab.getChannelData(0);  // mono Float32Array at 16 kHz
-    });
+    return ctx.decodeAudioData(buf).then(
+      ab => { ctx.close(); return ab.getChannelData(0); },
+      err => { ctx.close(); throw err; }
+    );
   });
 }
 
@@ -296,6 +304,13 @@ function addCard(id, name, text) {
 }
 
 function setCardBody(body, state, detail) {
+  if (state === 'streaming') {
+    const existing = body.querySelector('.transcript');
+    if (existing?.firstChild) {
+      existing.firstChild.nodeValue = detail;
+      return;
+    }
+  }
   const p = document.createElement('p');
   switch (state) {
     case 'queued':
@@ -337,7 +352,6 @@ btnCopyAll.addEventListener('click', () => {
 
 btnClearAll.addEventListener('click', () => {
   pending.length = 0;
-  savedTranscripts = [];
   queueEl.innerHTML = '';
   cards.clear();
   toolbar.hidden = true;
@@ -380,13 +394,14 @@ function loadSaved() {
 
 function persistTranscript(id, name, text) {
   try {
-    const idx = savedTranscripts.findIndex(t => t.id === id);
+    const transcripts = loadSaved();
+    const idx = transcripts.findIndex(t => t.id === id);
     if (idx >= 0) {
-      savedTranscripts[idx] = { id, name, text };
+      transcripts[idx] = { id, name, text };
     } else {
-      savedTranscripts.push({ id, name, text });
+      transcripts.push({ id, name, text });
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedTranscripts));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(transcripts));
   } catch {
     // localStorage unavailable (private mode quota, etc.) — silently skip
   }

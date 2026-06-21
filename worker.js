@@ -21,6 +21,10 @@ self.addEventListener('message', async ({ data: msg }) => {
       break;
     }
     case 'transcribe': {
+      if (!transcriber) {
+        self.postMessage({ type: 'transcribe-error', data: 'Model not loaded yet' });
+        break;
+      }
       try {
         const result = await transcriber(
           { data: msg.audio, sampling_rate: 16000 },
