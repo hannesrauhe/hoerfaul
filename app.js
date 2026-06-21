@@ -45,13 +45,17 @@ if (savedTranscripts.length > 0) {
 }
 
 // ── Web Share Target: retrieve file stashed by the service worker ─────────────
-if (location.search.includes('shared=1')) {
+// sessionStorage preserves the signal through the COI reload that fires when
+// crossOriginIsolated is false on the initial share-triggered page load.
+if (location.search.includes('shared=1') || sessionStorage.getItem('share-pending') === '1') {
   history.replaceState({}, '', location.pathname);
+  sessionStorage.setItem('share-pending', '1');
   (async () => {
     try {
       const cache = await caches.open('hoerfaul-share');
       const response = await cache.match('shared-file');
       if (!response) return;
+      sessionStorage.removeItem('share-pending');
       await cache.delete('shared-file');
       const blob = await response.blob();
       const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
