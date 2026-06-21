@@ -184,6 +184,7 @@ select {
 .btn-summarize {
   display: inline-block;
   margin-top: 0.6rem;
+  margin-right: 0.4rem;
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
   font-weight: 500;

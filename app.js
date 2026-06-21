@@ -38,7 +38,7 @@ const toastEl       = document.getElementById('toast');
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
 let transcriber = null;
-let summarizer  = null;
+const summarizers = new Map(); // modelKey → loaded pipeline
 let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
@@ -140,11 +140,11 @@ function showCompat(msg) {
 }
 
 // ── Summarizer ───────────────────────────────────────────────────────────────
-async function ensureSummarizer(onStatus) {
-  if (summarizer) return summarizer;
-  const model = navigator.gpu ? SUMM_MODELS.gemma4 : SUMM_MODELS.gemma270m;
+async function ensureSummarizer(modelKey, onStatus) {
+  if (summarizers.has(modelKey)) return summarizers.get(modelKey);
+  const model = SUMM_MODELS[modelKey];
   onStatus(`Loading ${model.label}…`);
-  summarizer = await pipeline('text-generation', model.id, {
+  const pipe = await pipeline('text-generation', model.id, {
     device: model.device,
     dtype: model.dtype,
     progress_callback: info => {
@@ -154,15 +154,24 @@ async function ensureSummarizer(onStatus) {
       }
     },
   });
-  return summarizer;
+  summarizers.set(modelKey, pipe);
+  return pipe;
 }
 
-async function summarizeText(text) {
-  const output = await summarizer(
+async function summarizeText(pipe, text) {
+  const output = await pipe(
     [{ role: 'user', content: `Summarize this voice message transcript in 2–3 sentences:\n\n${text}` }],
     { max_new_tokens: 200, do_sample: false }
   );
   return output[0].generated_text.at(-1).content.trim();
+}
+
+function makeSummBtn(modelKey, label) {
+  const btn = document.createElement('button');
+  btn.className = 'btn-summarize';
+  btn.dataset.model = modelKey;
+  btn.textContent = label;
+  return btn;
 }
 
 // ── File input wiring ────────────────────────────────────────────────────────
@@ -312,10 +321,10 @@ function setCardBody(body, state, detail) {
     case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      const summBtn = document.createElement('button');
-      summBtn.className = 'btn-summarize';
-      summBtn.textContent = 'Summarize';
-      body.replaceChildren(p, summBtn);
+      const btns = navigator.gpu
+        ? [makeSummBtn('gemma4', 'Summarize · Gemma 4'), makeSummBtn('gemma270m', 'Summarize · 270M')]
+        : [makeSummBtn('gemma270m', 'Summarize')];
+      body.replaceChildren(p, ...btns);
       return;
     }
     case 'error':
@@ -349,11 +358,12 @@ queueEl.addEventListener('click', async e => {
   const transcript = entry.body.querySelector('.transcript')?.textContent;
   if (!transcript) return;
 
+  const modelKey = btn.dataset.model;
   btn.disabled = true;
   try {
-    await ensureSummarizer(msg => { btn.textContent = msg; });
+    const pipe = await ensureSummarizer(modelKey, msg => { btn.textContent = msg; });
     btn.textContent = 'Summarizing…';
-    const summary = await summarizeText(transcript);
+    const summary = await summarizeText(pipe, transcript);
     appendSummary(entry.body, summary);
     const saved = savedTranscripts.find(t => t.id === id);
     if (saved) {
