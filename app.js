@@ -1,4 +1,4 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+const worker = new Worker('./worker.js', { type: 'module' });
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -31,37 +31,79 @@ const toastEl       = document.getElementById('toast');
 
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
-let transcriber = null;
-let processing  = false;
-const pending   = [];
-const cards     = new Map();  // fileKey → <article> element
-let pendingSharedFile = null; // file received via Web Share Target, queued until model ready
+let modelReady        = false;
+let modelLoading      = false;
+let activeXcription   = null;  // { id, entry, file, resolve, reject }
+let processing        = false;
+const pending         = [];
+const cards           = new Map();  // fileKey → { card, body }
+let pendingSharedFile = null;
 
 // ── Restore saved transcripts from previous session ──────────────────────────
-let savedTranscripts = loadSaved();
-if (savedTranscripts.length > 0) {
-  savedTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
+const restoredTranscripts = loadSaved();
+if (restoredTranscripts.length > 0) {
+  restoredTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
   toolbar.hidden = false;
 }
 
 // ── Web Share Target: retrieve file stashed by the service worker ─────────────
-if (location.search.includes('shared=1')) {
+const sharedKey = new URLSearchParams(location.search).get('shared');
+if (sharedKey) {
   history.replaceState({}, '', location.pathname);
   (async () => {
     try {
       const cache = await caches.open('hoerfaul-share');
-      const response = await cache.match('shared-file');
+      const response = await cache.match(sharedKey);
       if (!response) return;
-      await cache.delete('shared-file');
+      await cache.delete(sharedKey);
       const blob = await response.blob();
       const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
       pendingSharedFile = new File([blob], name, { type: blob.type });
-      checkWasmSupport();  // auto-load when a file arrives via share target
+      if (modelReady) {
+        handleFile(pendingSharedFile);
+        pendingSharedFile = null;
+      }
     } catch (err) {
       console.error('Failed to retrieve shared file:', err);
     }
   })();
 }
+
+// ── Worker message handling ───────────────────────────────────────────────────
+worker.addEventListener('message', ({ data: msg }) => {
+  switch (msg.type) {
+    case 'progress':
+      onModelProgress(msg.data);
+      break;
+    case 'ready':
+      modelReady = true;
+      modelLoading = false;
+      modelProgress.hidden = true;
+      modelLabel.textContent = 'Model loaded';
+      enableDropZone();
+      break;
+    case 'model-error':
+      modelLoading = false;
+      modelProgress.hidden = true;
+      modelLabel.textContent = `Failed to load model: ${msg.data}`;
+      break;
+    case 'done':
+      if (activeXcription) {
+        const { id, entry, file, resolve } = activeXcription;
+        const text = (msg.data ?? '').trim() || '(no speech detected)';
+        setCardBody(entry.body, 'done', text);
+        if (cards.has(id)) persistTranscript(id, file.name, text);
+        resolve();
+      }
+      break;
+    case 'transcribe-error':
+      if (activeXcription) {
+        setCardBody(activeXcription.entry.body, 'error', msg.data);
+        activeXcription.reject(new Error(msg.data));
+      }
+      break;
+  }
+});
 
 // ── Model initialization ─────────────────────────────────────────────────────
 btnLoadModel.addEventListener('click', checkWasmSupport);
@@ -77,28 +119,15 @@ async function checkWasmSupport() {
   initModel();
 }
 
-async function initModel() {
+function initModel() {
+  if (modelReady || modelLoading) return;
+  modelLoading = true;
   const model = MODELS[modelSelectEl.value] ?? MODELS.german;
   modelPick.hidden = true;
   modelLabel.hidden = false;
   modelLabel.textContent = `Loading ${model.label}…`;
   modelProgress.hidden = false;
-
-  try {
-    transcriber = await pipeline(
-      'automatic-speech-recognition',
-      model.id,
-      { dtype: model.dtype, progress_callback: onModelProgress }
-    );
-
-    modelProgress.hidden = true;
-    modelLabel.textContent = 'Model loaded';
-    enableDropZone();
-  } catch (err) {
-    modelProgress.hidden = true;
-    modelLabel.textContent = `Failed to load model: ${err.message}`;
-    console.error(err);
-  }
+  worker.postMessage({ type: 'load', modelId: model.id, dtype: model.dtype });
 }
 
 function onModelProgress(info) {
@@ -118,7 +147,7 @@ function enableDropZone() {
   dropZone.setAttribute('aria-disabled', 'false');
   dropHint.textContent = 'tap to choose a file · or drag & drop';
   if (pendingSharedFile) {
-    handleFiles([pendingSharedFile]);
+    handleFile(pendingSharedFile);
     pendingSharedFile = null;
   }
 }
@@ -130,20 +159,20 @@ function showCompat(msg) {
 
 // ── File input wiring ────────────────────────────────────────────────────────
 dropZone.addEventListener('click', () => {
-  if (transcriber) fileInput.click();
+  if (modelReady) fileInput.click();
 });
 
 dropZone.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ' ') && transcriber) fileInput.click();
+  if ((e.key === 'Enter' || e.key === ' ') && modelReady) fileInput.click();
 });
 
 fileInput.addEventListener('change', () => {
-  if (fileInput.files.length) handleFiles([...fileInput.files]);
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
   fileInput.value = '';
 });
 
 dropZone.addEventListener('dragover', e => {
-  if (!transcriber) return;
+  if (!modelReady) return;
   e.preventDefault();
   dropZone.classList.add('drag-over');
 });
@@ -153,9 +182,9 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  if (!transcriber) return;
+  if (!modelReady) return;
   const file = [...e.dataTransfer.files].find(isAudio);
-  if (file) handleFiles([file]);
+  if (file) handleFile(file);
 });
 
 function isAudio(file) {
@@ -163,9 +192,8 @@ function isAudio(file) {
 }
 
 // ── File handling ────────────────────────────────────────────────────────────
-function handleFiles(files) {
-  const file = files[0];
-  if (!file) return;
+function handleFile(file) {
+  if (!file || !isAudio(file)) return;
 
   const id = fileKey(file);
   if (cards.has(id)) {
@@ -199,22 +227,34 @@ async function transcribeFile(file, id) {
 
   setCardBody(entry.body, 'working');
 
-  let url;
   try {
-    url = URL.createObjectURL(file);
-    const lang = langSelect.value || null;  // empty string = auto-detect
-    const result = await transcriber(url, { language: lang });
-    const text = (result.text ?? '').trim() || '(no speech detected)';
-    setCardBody(entry.body, 'done', text);
-    if (cards.has(id)) {  // skip if cleared during transcription
-      persistTranscript(id, file.name, text);
-    }
+    const audio = await decodeAudio(file);
+    await new Promise((resolve, reject) => {
+      activeXcription = { id, entry, file, resolve, reject };
+      worker.postMessage(
+        { type: 'transcribe', audio, language: langSelect.value || null },
+        [audio.buffer]  // transfer ownership — zero copy
+      );
+    });
   } catch (err) {
     setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
-    if (url) URL.revokeObjectURL(url);
+    activeXcription = null;
   }
+}
+
+function decodeAudio(file) {
+  return file.arrayBuffer().then(buf => {
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    return ctx.decodeAudioData(buf).then(ab => {
+      ctx.close();
+      return new Float32Array(ab.getChannelData(0));
+    }).catch(err => {
+      ctx.close();
+      throw err;
+    });
+  });
 }
 
 // ── Card rendering ───────────────────────────────────────────────────────────
@@ -292,7 +332,6 @@ btnCopyAll.addEventListener('click', () => {
 
 btnClearAll.addEventListener('click', () => {
   pending.length = 0;
-  savedTranscripts = [];
   queueEl.innerHTML = '';
   cards.clear();
   toolbar.hidden = true;
@@ -335,13 +374,14 @@ function loadSaved() {
 
 function persistTranscript(id, name, text) {
   try {
-    const idx = savedTranscripts.findIndex(t => t.id === id);
+    const transcripts = loadSaved();
+    const idx = transcripts.findIndex(t => t.id === id);
     if (idx >= 0) {
-      savedTranscripts[idx] = { id, name, text };
+      transcripts[idx] = { id, name, text };
     } else {
-      savedTranscripts.push({ id, name, text });
+      transcripts.push({ id, name, text });
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedTranscripts));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(transcripts));
   } catch {
     // localStorage unavailable (private mode quota, etc.) — silently skip
   }
