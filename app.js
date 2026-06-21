@@ -1,0 +1,325 @@
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+
+// ── DOM refs ────────────────────────────────────────────────────────────────
+const modelSection  = document.getElementById('model-section');
+const modelLabel    = document.getElementById('model-label');
+const modelDetail   = document.getElementById('model-detail');
+const progressFill  = document.getElementById('progress-fill');
+const compatSection = document.getElementById('compat-section');
+const compatMessage = document.getElementById('compat-message');
+const dropZone      = document.getElementById('drop-zone');
+const dropHint      = document.getElementById('drop-hint');
+const fileInput     = document.getElementById('file-input');
+const queueEl       = document.getElementById('queue');
+const toolbar       = document.getElementById('toolbar');
+const btnCopyAll    = document.getElementById('btn-copy-all');
+const btnClearAll   = document.getElementById('btn-clear-all');
+const toastEl       = document.getElementById('toast');
+
+// ── State ────────────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'hoerfaul-v1';
+let transcriber = null;
+let processing  = false;
+const pending   = [];
+const cards     = new Map();  // fileKey → <article> element
+
+// ── Restore saved transcripts from previous session ──────────────────────────
+const saved = loadSaved();
+if (saved.length > 0) {
+  saved.forEach(({ id, name, text }) => addCard(id, name, text));
+  toolbar.hidden = false;
+}
+
+// ── Model initialization ─────────────────────────────────────────────────────
+checkWasmSupport();
+
+async function checkWasmSupport() {
+  try {
+    // Quick WASM availability check
+    await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+  } catch {
+    showCompat('Your browser does not support WebAssembly, which is required for on-device transcription. Try Chrome, Firefox, or Safari 15+.');
+    return;
+  }
+  initModel();
+}
+
+async function initModel() {
+  modelSection.hidden = false;
+
+  try {
+    transcriber = await pipeline(
+      'automatic-speech-recognition',
+      'onnx-community/whisper-tiny',
+      {
+        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
+        progress_callback: onModelProgress,
+      }
+    );
+
+    modelSection.hidden = true;
+    enableDropZone();
+  } catch (err) {
+    modelLabel.textContent = 'Failed to load model.';
+    modelDetail.textContent = err.message;
+    console.error(err);
+  }
+}
+
+function onModelProgress(info) {
+  if (info.status === 'progress') {
+    const pct = info.total ? Math.round((info.loaded / info.total) * 100) : 0;
+    progressFill.style.width = pct + '%';
+    modelDetail.textContent = `${info.file ?? ''}  ${pct}%`;
+  } else if (info.status === 'done') {
+    modelDetail.textContent = '';
+  } else if (info.status === 'ready') {
+    progressFill.style.width = '100%';
+  }
+}
+
+function enableDropZone() {
+  dropZone.classList.add('ready');
+  dropZone.setAttribute('aria-disabled', 'false');
+  dropHint.textContent = 'tap to choose files · or drag & drop';
+}
+
+function showCompat(msg) {
+  compatSection.hidden = false;
+  compatMessage.textContent = msg;
+}
+
+// ── File input wiring ────────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => {
+  if (transcriber) fileInput.click();
+});
+
+dropZone.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && transcriber) fileInput.click();
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFiles([...fileInput.files]);
+  fileInput.value = '';
+});
+
+dropZone.addEventListener('dragover', e => {
+  if (!transcriber) return;
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (!transcriber) return;
+  const files = [...e.dataTransfer.files].filter(isAudio);
+  if (files.length) handleFiles(files);
+});
+
+function isAudio(file) {
+  return file.type.startsWith('audio/') || /\.(opus|m4a|ogg|webm|mp3|wav|flac|aac|oga)$/i.test(file.name);
+}
+
+// ── File handling ────────────────────────────────────────────────────────────
+function handleFiles(files) {
+  files.forEach(file => {
+    const id = fileKey(file);
+    if (cards.has(id)) return;  // already present (same name+size)
+    pending.push({ file, id });
+    addCard(id, file.name, null);
+  });
+  toolbar.hidden = false;
+  drainQueue();
+}
+
+function fileKey(file) {
+  return `${file.name}::${file.size}`;
+}
+
+async function drainQueue() {
+  if (processing) return;
+  processing = true;
+  while (pending.length > 0) {
+    const { file, id } = pending.shift();
+    await transcribeFile(file, id);
+  }
+  processing = false;
+}
+
+async function transcribeFile(file, id) {
+  const card = cards.get(id);
+  if (!card) return;
+
+  setCardBody(card, 'working');
+
+  let url;
+  try {
+    url = URL.createObjectURL(file);
+    const result = await transcriber(url, { language: 'auto' });
+    const text = result.text.trim();
+    setCardBody(card, 'done', text);
+    persistTranscript(id, file.name, text);
+  } catch (err) {
+    setCardBody(card, 'error', err.message);
+    console.error(err);
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
+// ── Card rendering ───────────────────────────────────────────────────────────
+function addCard(id, name, text) {
+  const card = document.createElement('article');
+  card.className = 'card';
+
+  const header = document.createElement('div');
+  header.className = 'card-header';
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'card-name';
+  nameEl.title = name;
+  nameEl.textContent = name;
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn-icon';
+  copyBtn.title = 'Copy transcript';
+  copyBtn.setAttribute('aria-label', 'Copy transcript');
+  copyBtn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </svg>`;
+  copyBtn.addEventListener('click', () => {
+    const t = card.querySelector('.transcript');
+    if (t) copyText(t.textContent);
+  });
+
+  header.appendChild(nameEl);
+  header.appendChild(copyBtn);
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+
+  card.appendChild(header);
+  card.appendChild(body);
+
+  cards.set(id, card);
+  queueEl.appendChild(card);
+
+  // Set initial body state
+  if (text !== null) {
+    setCardBody(card, 'done', text);
+  } else {
+    setCardBody(card, 'queued');
+  }
+}
+
+function setCardBody(card, state, detail) {
+  const body = card.querySelector('.card-body');
+  switch (state) {
+    case 'queued':
+      body.innerHTML = '<p class="status-text"><span class="spinner"></span> Waiting…</p>';
+      break;
+    case 'working':
+      body.innerHTML = '<p class="status-text"><span class="spinner"></span> Transcribing…</p>';
+      break;
+    case 'done':
+      body.innerHTML = `<p class="transcript">${escapeHtml(detail)}</p>`;
+      break;
+    case 'error':
+      body.innerHTML = `<p class="status-text error">Error: ${escapeHtml(detail)}</p>`;
+      break;
+  }
+}
+
+// ── Toolbar actions ──────────────────────────────────────────────────────────
+btnCopyAll.addEventListener('click', () => {
+  const parts = [...queueEl.querySelectorAll('.transcript')]
+    .map(el => el.textContent)
+    .filter(Boolean);
+  if (parts.length) copyText(parts.join('\n\n---\n\n'));
+});
+
+btnClearAll.addEventListener('click', () => {
+  queueEl.innerHTML = '';
+  cards.clear();
+  toolbar.hidden = true;
+  localStorage.removeItem(STORAGE_KEY);
+});
+
+// ── Clipboard ────────────────────────────────────────────────────────────────
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied');
+  } catch {
+    // Fallback for insecure contexts
+    const ta = Object.assign(document.createElement('textarea'), {
+      value: text,
+      style: 'position:fixed;opacity:0',
+    });
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    showToast('Copied');
+  }
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2000);
+}
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]'); }
+  catch { return []; }
+}
+
+function persistTranscript(id, name, text) {
+  try {
+    const list = loadSaved();
+    if (!list.find(t => t.id === id)) {
+      list.push({ id, name, text });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    }
+  } catch {
+    // localStorage unavailable (private mode quota, etc.) — silently skip
+  }
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Future: summarize with LLM API ───────────────────────────────────────────
+//
+// To enable:
+// 1. Uncomment and fill in an API key (or add a UI input that stores it in localStorage).
+// 2. Unhide the #btn-summarize element in index.html.
+//
+// import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
+//
+// async function summarize(text) {
+//   const key = localStorage.getItem('api-key') ?? '';
+//   const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+//   const msg = await client.messages.create({
+//     model: 'claude-sonnet-4-5',
+//     max_tokens: 1024,
+//     messages: [{ role: 'user', content: `Summarize this voice message:\n\n${text}` }],
+//   });
+//   return msg.content[0].text;
+// }
