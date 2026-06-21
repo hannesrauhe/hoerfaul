@@ -1,4 +1,4 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+const worker = new Worker('./worker.js', { type: 'module' });
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -31,11 +31,12 @@ const toastEl       = document.getElementById('toast');
 
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
-let transcriber = null;
-let processing  = false;
-const pending   = [];
-const cards     = new Map();  // fileKey → <article> element
-let pendingSharedFile = null; // file received via Web Share Target, queued until model ready
+let modelReady        = false;
+let activeXcription   = null;  // { id, entry, file, partial, resolve, reject }
+let processing        = false;
+const pending         = [];
+const cards           = new Map();  // fileKey → { card, body }
+let pendingSharedFile = null;
 
 // ── Restore saved transcripts from previous session ──────────────────────────
 let savedTranscripts = loadSaved();
@@ -63,6 +64,47 @@ if (location.search.includes('shared=1')) {
   })();
 }
 
+// ── Worker message handling ───────────────────────────────────────────────────
+worker.addEventListener('message', ({ data: msg }) => {
+  switch (msg.type) {
+    case 'progress':
+      onModelProgress(msg.data);
+      break;
+    case 'ready':
+      modelReady = true;
+      modelProgress.hidden = true;
+      modelLabel.textContent = 'Model loaded';
+      enableDropZone();
+      break;
+    case 'model-error':
+      modelProgress.hidden = true;
+      modelLabel.textContent = `Failed to load model: ${msg.data}`;
+      break;
+    case 'chunk':
+      if (activeXcription) {
+        activeXcription.partial += msg.data;
+        const t = activeXcription.partial.trim();
+        if (t) setCardBody(activeXcription.entry.body, 'streaming', t);
+      }
+      break;
+    case 'done':
+      if (activeXcription) {
+        const { id, entry, partial, file, resolve } = activeXcription;
+        const text = (msg.data ?? partial).trim() || '(no speech detected)';
+        setCardBody(entry.body, 'done', text);
+        if (cards.has(id)) persistTranscript(id, file.name, text);
+        resolve();
+      }
+      break;
+    case 'transcribe-error':
+      if (activeXcription) {
+        setCardBody(activeXcription.entry.body, 'error', msg.data);
+        activeXcription.reject(new Error(msg.data));
+      }
+      break;
+  }
+});
+
 // ── Model initialization ─────────────────────────────────────────────────────
 btnLoadModel.addEventListener('click', checkWasmSupport);
 
@@ -77,28 +119,13 @@ async function checkWasmSupport() {
   initModel();
 }
 
-async function initModel() {
+function initModel() {
   const model = MODELS[modelSelectEl.value] ?? MODELS.german;
   modelPick.hidden = true;
   modelLabel.hidden = false;
   modelLabel.textContent = `Loading ${model.label}…`;
   modelProgress.hidden = false;
-
-  try {
-    transcriber = await pipeline(
-      'automatic-speech-recognition',
-      model.id,
-      { dtype: model.dtype, progress_callback: onModelProgress }
-    );
-
-    modelProgress.hidden = true;
-    modelLabel.textContent = 'Model loaded';
-    enableDropZone();
-  } catch (err) {
-    modelProgress.hidden = true;
-    modelLabel.textContent = `Failed to load model: ${err.message}`;
-    console.error(err);
-  }
+  worker.postMessage({ type: 'load', modelId: model.id, dtype: model.dtype });
 }
 
 function onModelProgress(info) {
@@ -130,11 +157,11 @@ function showCompat(msg) {
 
 // ── File input wiring ────────────────────────────────────────────────────────
 dropZone.addEventListener('click', () => {
-  if (transcriber) fileInput.click();
+  if (modelReady) fileInput.click();
 });
 
 dropZone.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ' ') && transcriber) fileInput.click();
+  if ((e.key === 'Enter' || e.key === ' ') && modelReady) fileInput.click();
 });
 
 fileInput.addEventListener('change', () => {
@@ -143,7 +170,7 @@ fileInput.addEventListener('change', () => {
 });
 
 dropZone.addEventListener('dragover', e => {
-  if (!transcriber) return;
+  if (!modelReady) return;
   e.preventDefault();
   dropZone.classList.add('drag-over');
 });
@@ -153,7 +180,7 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  if (!transcriber) return;
+  if (!modelReady) return;
   const file = [...e.dataTransfer.files].find(isAudio);
   if (file) handleFiles([file]);
 });
@@ -199,28 +226,17 @@ async function transcribeFile(file, id) {
 
   setCardBody(entry.body, 'working');
 
-  let partial = '';
-  let url;
+  const url = URL.createObjectURL(file);
   try {
-    url = URL.createObjectURL(file);
-    const lang = langSelect.value || null;
-    const result = await transcriber(url, {
-      language: lang,
-      chunk_length_s: 20,
-      stride_length_s: 3,
-      chunk_callback: (chunk) => {
-        partial += chunk.text;
-        if (partial.trim()) setCardBody(entry.body, 'streaming', partial.trim());
-      },
+    await new Promise((resolve, reject) => {
+      activeXcription = { id, entry, file, partial: '', resolve, reject };
+      worker.postMessage({ type: 'transcribe', url, language: langSelect.value || null });
     });
-    const text = (result.text ?? partial).trim() || '(no speech detected)';
-    setCardBody(entry.body, 'done', text);
-    if (cards.has(id)) persistTranscript(id, file.name, text);
   } catch (err) {
-    setCardBody(entry.body, 'error', err.message);
     console.error(err);
   } finally {
-    if (url) URL.revokeObjectURL(url);
+    URL.revokeObjectURL(url);
+    activeXcription = null;
   }
 }
 
