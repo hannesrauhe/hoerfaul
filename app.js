@@ -10,8 +10,7 @@ const MODELS = {
 
 // Gemma 4 E2B requires WebGPU (q4f16); Gemma 3 270M runs on WASM (fp32) as fallback.
 const SUMM_MODELS = {
-  gemma4:    { label: 'Gemma 4 E2B (WebGPU)', id: 'onnx-community/gemma-4-E2B-it-ONNX',  device: 'webgpu', dtype: 'q4f16', requiresWebGPU: true  },
-  gemma270m: { label: 'Gemma 3 270M (WASM)',  id: 'onnx-community/gemma-3-270m-it-ONNX', device: 'wasm',   dtype: 'fp32',  requiresWebGPU: false },
+  gemma4: { label: 'Gemma 4 E2B', id: 'onnx-community/gemma-4-E2B-it-ONNX', device: 'webgpu', dtype: 'q4f16' },
 };
 
 const SUMM_PROMPTS = {
@@ -338,9 +337,7 @@ function setCardBody(body, state, detail) {
     case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      const btns = navigator.gpu
-        ? [makeSummBtn('gemma4', 'Summarize · Gemma 4'), makeSummBtn('gemma270m', 'Summarize · 270M')]
-        : [makeSummBtn('gemma270m', 'Summarize')];
+      const btns = navigator.gpu ? [makeSummBtn('gemma4', 'Summarize')] : [];
       body.replaceChildren(p, ...btns);
       return;
     }
