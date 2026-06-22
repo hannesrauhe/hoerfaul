@@ -213,6 +213,7 @@ async function transcribeFile(file, id) {
       decode_kwargs: { skip_special_tokens: true },
       callback_function: (text) => {
         accumulated += text;
+        console.log('[stream] token:', JSON.stringify(text), '| accumulated:', accumulated.length, 'chars');
         const e = cards.get(id);
         if (e) setCardBody(e.body, 'streaming', accumulated);
       },
