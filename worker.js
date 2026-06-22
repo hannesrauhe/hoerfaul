@@ -20,6 +20,7 @@ self.onmessage = async ({ data }) => {
 
   } else if (data.type === 'transcribe') {
     try {
+      console.log('[worker] audio:', data.audio?.constructor?.name, 'length:', data.audio?.length);
       const streamer = new WhisperTextStreamer(transcriber.tokenizer, {
         skip_prompt: true,
         decode_kwargs: { skip_special_tokens: true },

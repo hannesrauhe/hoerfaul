@@ -203,7 +203,9 @@ async function decodeAudio(file) {
   const audioCtx = new AudioContext({ sampleRate: 16000 });
   try {
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    return audioBuffer.getChannelData(0);  // mono Float32Array at 16 kHz
+    // .slice() copies into a plain, transferable ArrayBuffer (getChannelData
+    // returns a view into AudioContext-managed memory that may not be transferable)
+    return audioBuffer.getChannelData(0).slice();
   } finally {
     audioCtx.close();
   }
@@ -235,7 +237,7 @@ async function transcribeFile(file, id) {
         }
       };
       worker.addEventListener('message', onMessage);
-      worker.postMessage({ type: 'transcribe', audio, lang }, [audio.buffer]);
+      worker.postMessage({ type: 'transcribe', audio, lang });
     });
 
     setCardBody(entry.body, 'done', text);
