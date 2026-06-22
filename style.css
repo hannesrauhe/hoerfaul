@@ -172,6 +172,12 @@ select {
 }
 .card-body { font-size: 0.95rem; line-height: 1.65; }
 .transcript { white-space: pre-wrap; word-break: break-word; }
+.transcript.streaming::after {
+  content: ' ▍';
+  animation: blink 1s step-start infinite;
+  opacity: 0.6;
+}
+@keyframes blink { 50% { opacity: 0; } }
 .status-text { color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
 .status-text.error { color: var(--danger); }
 

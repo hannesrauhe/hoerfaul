@@ -207,7 +207,13 @@ async function transcribeFile(file, id) {
   try {
     url = URL.createObjectURL(file);
     const lang = langSelect.value || null;  // empty string = auto-detect
-    const result = await transcriber(url, { language: lang, chunk_length_s: 30, stride_length_s: 5 });
+    let accumulated = '';
+    const chunk_callback = (chunk) => {
+      accumulated += chunk.text;
+      const e = cards.get(id);
+      if (e) setCardBody(e.body, 'streaming', accumulated);
+    };
+    const result = await transcriber(url, { language: lang, chunk_length_s: 30, stride_length_s: 5, chunk_callback });
     const text = (result.text ?? '').trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
     if (cards.has(id)) {  // skip if cleared during transcription
@@ -274,6 +280,10 @@ function setCardBody(body, state, detail) {
       p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
       break;
     }
+    case 'streaming':
+      p.className = 'transcript streaming';
+      p.textContent = detail;
+      break;
     case 'done':
       p.className = 'transcript';
       p.textContent = detail;
