@@ -25,7 +25,7 @@ self.onmessage = async ({ data }) => {
         decode_kwargs: { skip_special_tokens: true },
         callback_function: (text) => self.postMessage({ type: 'token', text }),
       });
-      const result = await transcriber({ raw: data.audio, sampling_rate: 16000 }, {
+      const result = await transcriber(data.audio, {
         language: data.lang,
         chunk_length_s: 30,
         stride_length_s: 5,
