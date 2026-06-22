@@ -8,10 +8,15 @@ const MODELS = {
   small:  { label: 'Whisper Small',    id: 'onnx-community/whisper-small',                       dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
 };
 
-// Gemma 4 E2B requires WebGPU (q4f16); Gemma 3 270M runs on WASM (fp32) as fallback.
+// Gemma 4 E2B requires WebGPU (q4f16); check adapter availability at startup.
 const SUMM_MODELS = {
   gemma4: { label: 'Gemma 4 E2B', id: 'onnx-community/gemma-4-E2B-it-ONNX', device: 'webgpu', dtype: 'q4f16' },
 };
+
+let webgpuAvailable = false;
+if (navigator.gpu) {
+  navigator.gpu.requestAdapter().then(adapter => { webgpuAvailable = !!adapter; });
+}
 
 const SUMM_PROMPTS = {
   german:     'Fasse diese Sprachnachricht zusammen:\n\n',
@@ -372,7 +377,7 @@ function setCardBody(body, state, detail) {
     case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      const btns = navigator.gpu ? [makeSummBtn('gemma4', 'Summarize')] : [];
+      const btns = webgpuAvailable ? [makeSummBtn('gemma4', 'Summarize')] : [];
       body.replaceChildren(p, ...btns);
       return;
     }
