@@ -1,9 +1,37 @@
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4/dist/transformers.min.js';
+
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
   german: { label: 'German fine-tune', id: 'onnx-community/whisper-large-v3-turbo-german-ONNX', dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' } },
   tiny:   { label: 'Whisper Tiny',     id: 'onnx-community/whisper-tiny',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
   base:   { label: 'Whisper Base',     id: 'onnx-community/whisper-base',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
   small:  { label: 'Whisper Small',    id: 'onnx-community/whisper-small',                       dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
+};
+
+// Gemma 4 E2B requires WebGPU (q4f16); check adapter availability at startup.
+const SUMM_MODELS = {
+  gemma4: { label: 'Gemma 4 E2B', id: 'onnx-community/gemma-4-E2B-it-ONNX', device: 'webgpu', dtype: 'q4f16' },
+};
+
+let webgpuAvailable = false;
+if (navigator.gpu) {
+  navigator.gpu.requestAdapter().then(adapter => { webgpuAvailable = !!adapter; });
+}
+
+const SUMM_PROMPTS = {
+  german:     'Fasse diese Sprachnachricht zusammen:\n\n',
+  english:    'Summarize this voice message transcript:\n\n',
+  french:     'Résume ce message vocal :\n\n',
+  spanish:    'Resume este mensaje de voz:\n\n',
+  italian:    'Riassumi questo messaggio vocale:\n\n',
+  dutch:      'Vat dit voicebericht samen:\n\n',
+  polish:     'Podsumuj tę wiadomość głosową:\n\n',
+  portuguese: 'Resuma esta mensagem de voz:\n\n',
+  russian:    'Кратко изложи это голосовое сообщение:\n\n',
+  turkish:    'Bu sesli mesajı özetle:\n\n',
+  arabic:     'لخّص هذه الرسالة الصوتية:\n\n',
+  japanese:   'この音声メッセージを要約してください：\n\n',
+  chinese:    '请总结这段语音消息：\n\n',
 };
 
 // ── DOM refs ────────────────────────────────────────────────────────────────
@@ -48,6 +76,7 @@ worker.addEventListener('message', ({ data }) => {
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
 let modelReady = false;
+const summarizers = new Map(); // modelKey → loaded pipeline
 let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
@@ -56,7 +85,7 @@ let pendingSharedFile = null; // file received via Web Share Target, queued unti
 // ── Restore saved transcripts from previous session ──────────────────────────
 let savedTranscripts = loadSaved();
 if (savedTranscripts.length > 0) {
-  savedTranscripts.forEach(({ id, name, text }) => addCard(id, name, text));
+  savedTranscripts.forEach(({ id, name, text, summary }) => addCard(id, name, text, summary));
   toolbar.hidden = false;
 }
 
@@ -131,6 +160,42 @@ function enableDropZone() {
 function showCompat(msg) {
   compatSection.hidden = false;
   compatMessage.textContent = msg;
+}
+
+// ── Summarizer ───────────────────────────────────────────────────────────────
+async function ensureSummarizer(modelKey, onStatus) {
+  if (summarizers.has(modelKey)) return summarizers.get(modelKey);
+  const model = SUMM_MODELS[modelKey];
+  onStatus(`Loading ${model.label}…`);
+  const pipe = await pipeline('text-generation', model.id, {
+    device: model.device,
+    dtype: model.dtype,
+    progress_callback: info => {
+      if (info.status === 'progress' && info.total) {
+        const pct = Math.round((info.loaded / info.total) * 100);
+        onStatus(`Loading ${model.label}… ${pct}%`);
+      }
+    },
+  });
+  summarizers.set(modelKey, pipe);
+  return pipe;
+}
+
+async function summarizeText(pipe, text, lang) {
+  const prompt = (SUMM_PROMPTS[lang] ?? SUMM_PROMPTS.english) + text;
+  const output = await pipe(
+    [{ role: 'user', content: prompt }],
+    { max_new_tokens: 200, do_sample: false }
+  );
+  return output[0].generated_text.at(-1).content.trim();
+}
+
+function makeSummBtn(modelKey, label) {
+  const btn = document.createElement('button');
+  btn.className = 'btn-summarize';
+  btn.dataset.model = modelKey;
+  btn.textContent = label;
+  return btn;
 }
 
 // ── File input wiring ────────────────────────────────────────────────────────
@@ -251,9 +316,10 @@ async function transcribeFile(file, id) {
 }
 
 // ── Card rendering ───────────────────────────────────────────────────────────
-function addCard(id, name, text) {
+function addCard(id, name, text, summary) {
   const card = document.createElement('article');
   card.className = 'card';
+  card.dataset.id = id;
 
   const header = document.createElement('div');
   header.className = 'card-header';
@@ -290,6 +356,7 @@ function addCard(id, name, text) {
   queueEl.appendChild(card);
 
   setCardBody(body, text !== null ? 'done' : 'queued', text ?? undefined);
+  if (text !== null && summary) appendSummary(body, summary);
 }
 
 function setCardBody(body, state, detail) {
@@ -307,10 +374,13 @@ function setCardBody(body, state, detail) {
       p.className = 'transcript streaming';
       p.textContent = detail;
       break;
-    case 'done':
+    case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      break;
+      const btns = webgpuAvailable ? [makeSummBtn('gemma4', 'Summarize')] : [];
+      body.replaceChildren(p, ...btns);
+      return;
+    }
     case 'error':
       p.className = 'status-text error';
       p.textContent = `Error: ${detail}`;
@@ -318,6 +388,49 @@ function setCardBody(body, state, detail) {
   }
   body.replaceChildren(p);
 }
+
+function appendSummary(body, text) {
+  body.querySelector('.btn-summarize')?.remove();
+  let summEl = body.querySelector('.summary');
+  if (!summEl) {
+    summEl = document.createElement('p');
+    summEl.className = 'summary';
+    body.appendChild(summEl);
+  }
+  summEl.textContent = text;
+}
+
+// ── Summarize button (delegated) ─────────────────────────────────────────────
+queueEl.addEventListener('click', async e => {
+  const btn = e.target.closest('.btn-summarize');
+  if (!btn || btn.disabled) return;
+  const card = btn.closest('[data-id]');
+  const id = card?.dataset.id;
+  if (!id) return;
+  const entry = cards.get(id);
+  if (!entry) return;
+  const transcript = entry.body.querySelector('.transcript')?.textContent;
+  if (!transcript) return;
+
+  const modelKey = btn.dataset.model;
+  btn.disabled = true;
+  try {
+    const pipe = await ensureSummarizer(modelKey, msg => { btn.textContent = msg; });
+    btn.textContent = 'Summarizing…';
+    const summary = await summarizeText(pipe, transcript, langSelect.value);
+    appendSummary(entry.body, summary);
+    const saved = savedTranscripts.find(t => t.id === id);
+    if (saved) {
+      saved.summary = summary;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedTranscripts));
+    }
+  } catch (err) {
+    btn.textContent = 'Summarize';
+    btn.disabled = false;
+    showToast('Summarization failed');
+    console.error(err);
+  }
+});
 
 // ── Toolbar actions ──────────────────────────────────────────────────────────
 btnCopyAll.addEventListener('click', () => {
@@ -374,7 +487,7 @@ function persistTranscript(id, name, text) {
   try {
     const idx = savedTranscripts.findIndex(t => t.id === id);
     if (idx >= 0) {
-      savedTranscripts[idx] = { id, name, text };
+      savedTranscripts[idx] = { ...savedTranscripts[idx], id, name, text };
     } else {
       savedTranscripts.push({ id, name, text });
     }
@@ -384,21 +497,3 @@ function persistTranscript(id, name, text) {
   }
 }
 
-// ── Future: summarize with LLM API ───────────────────────────────────────────
-//
-// To enable:
-// 1. Uncomment and fill in an API key (or add a UI input that stores it in localStorage).
-// 2. Unhide the #btn-summarize element in index.html.
-//
-// import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
-//
-// async function summarize(text) {
-//   const key = localStorage.getItem('api-key') ?? '';
-//   const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
-//   const msg = await client.messages.create({
-//     model: 'claude-sonnet-4-5',
-//     max_tokens: 1024,
-//     messages: [{ role: 'user', content: `Summarize this voice message:\n\n${text}` }],
-//   });
-//   return msg.content[0].text;
-// }
