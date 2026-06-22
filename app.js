@@ -1,4 +1,4 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4/dist/transformers.min.js';
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -10,7 +10,7 @@ const MODELS = {
 
 // Gemma 4 E2B requires WebGPU (q4f16); Gemma 3 270M runs on WASM (fp32) as fallback.
 const SUMM_MODELS = {
-  gemma3_1b: { label: 'Gemma 3 1B', id: 'onnx-community/gemma-3-1b-it-ONNX-GQA', device: 'webgpu', dtype: 'q4' },
+  gemma4: { label: 'Gemma 4 E2B', id: 'onnx-community/gemma-4-E2B-it-ONNX', device: 'webgpu', dtype: 'q4f16' },
 };
 
 const SUMM_PROMPTS = {
@@ -372,7 +372,7 @@ function setCardBody(body, state, detail) {
     case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      const btns = navigator.gpu ? [makeSummBtn('gemma3_1b', 'Summarize')] : [];
+      const btns = navigator.gpu ? [makeSummBtn('gemma4', 'Summarize')] : [];
       body.replaceChildren(p, ...btns);
       return;
     }
