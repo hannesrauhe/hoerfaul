@@ -198,15 +198,25 @@ async function drainQueue() {
   processing = false;
 }
 
+async function decodeAudio(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const audioCtx = new AudioContext({ sampleRate: 16000 });
+  try {
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    return audioBuffer.getChannelData(0);  // mono Float32Array at 16 kHz
+  } finally {
+    audioCtx.close();
+  }
+}
+
 async function transcribeFile(file, id) {
   const entry = cards.get(id);
   if (!entry) return;
 
   setCardBody(entry.body, 'working');
 
-  let url;
   try {
-    url = URL.createObjectURL(file);
+    const audio = await decodeAudio(file);
     const lang = langSelect.value || null;  // empty string = auto-detect
 
     let accumulated = '';
@@ -225,7 +235,7 @@ async function transcribeFile(file, id) {
         }
       };
       worker.addEventListener('message', onMessage);
-      worker.postMessage({ type: 'transcribe', url, lang });
+      worker.postMessage({ type: 'transcribe', audio, lang }, [audio.buffer]);
     });
 
     setCardBody(entry.body, 'done', text);
@@ -235,8 +245,6 @@ async function transcribeFile(file, id) {
   } catch (err) {
     setCardBody(entry.body, 'error', err.message);
     console.error(err);
-  } finally {
-    if (url) URL.revokeObjectURL(url);
   }
 }
 
