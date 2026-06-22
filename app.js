@@ -1,4 +1,4 @@
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
+import { pipeline, WhisperTextStreamer } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js';
 
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
@@ -208,12 +208,16 @@ async function transcribeFile(file, id) {
     url = URL.createObjectURL(file);
     const lang = langSelect.value || null;  // empty string = auto-detect
     let accumulated = '';
-    const chunk_callback = (chunk) => {
-      accumulated += chunk.text;
-      const e = cards.get(id);
-      if (e) setCardBody(e.body, 'streaming', accumulated);
-    };
-    const result = await transcriber(url, { language: lang, chunk_length_s: 30, stride_length_s: 5, chunk_callback });
+    const streamer = new WhisperTextStreamer(transcriber.tokenizer, {
+      skip_prompt: true,
+      decode_kwargs: { skip_special_tokens: true },
+      callback_function: (text) => {
+        accumulated += text;
+        const e = cards.get(id);
+        if (e) setCardBody(e.body, 'streaming', accumulated);
+      },
+    });
+    const result = await transcriber(url, { language: lang, chunk_length_s: 30, stride_length_s: 5, streamer });
     const text = (result.text ?? '').trim() || '(no speech detected)';
     setCardBody(entry.body, 'done', text);
     if (cards.has(id)) {  // skip if cleared during transcription
