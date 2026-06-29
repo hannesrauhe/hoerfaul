@@ -90,11 +90,21 @@ h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
   border-radius: var(--radius);
   padding: 2.5rem 1.5rem;
   text-align: center;
-  cursor: wait;
+  cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
+/* Before a model is loaded the zone acts as the load-model trigger. */
+.drop-zone:not(.ready):not(.loading):hover {
+  border-color: var(--muted);
+  background: var(--surface);
+}
+.drop-zone:not(.ready):not(.loading):focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 2px;
+}
+.drop-zone.loading { cursor: wait; }
 .drop-zone.ready {
   border-color: var(--accent);
   cursor: pointer;

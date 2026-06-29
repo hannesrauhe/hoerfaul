@@ -36,11 +36,17 @@ worker.addEventListener('message', ({ data }) => {
       modelProgress.hidden = true;
       modelLabel.textContent = 'Model loaded';
       modelReady = true;
+      modelLoading = false;
       enableDropZone();
       break;
     case 'model-error':
       modelProgress.hidden = true;
+      modelLoading = false;
       modelLabel.textContent = `Failed to load model: ${data.message}`;
+      // Re-expose the picker and drop zone so the user can retry.
+      modelPick.hidden = false;
+      dropZone.classList.remove('loading');
+      dropHint.textContent = 'Loading failed — tap to try again';
       break;
   }
 });
@@ -48,6 +54,7 @@ worker.addEventListener('message', ({ data }) => {
 // ── State ────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'hoerfaul-v1';
 let modelReady = false;
+let modelLoading = false;
 let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
@@ -87,10 +94,13 @@ if (location.search.includes('shared=1') || sessionStorage.getItem('share-pendin
 btnLoadModel.addEventListener('click', checkWasmSupport);
 
 async function checkWasmSupport() {
+  if (modelReady || modelLoading) return;  // already loaded or in flight
+  modelLoading = true;
   try {
     // Quick WASM availability check
     await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
   } catch {
+    modelLoading = false;
     showCompat('Your browser does not support WebAssembly, which is required for on-device transcription. Try Chrome, Firefox, or Safari 15+.');
     return;
   }
@@ -99,6 +109,8 @@ async function checkWasmSupport() {
 
 function initModel() {
   const model = MODELS[modelSelectEl.value] ?? MODELS.german;
+  dropZone.classList.add('loading');
+  dropHint.textContent = 'Loading model…';
   modelPick.hidden = true;
   modelLabel.hidden = false;
   modelLabel.textContent = `Loading ${model.label}…`;
@@ -119,8 +131,9 @@ function onModelProgress(info) {
 }
 
 function enableDropZone() {
+  dropZone.classList.remove('loading');
   dropZone.classList.add('ready');
-  dropZone.setAttribute('aria-disabled', 'false');
+  dropZone.setAttribute('aria-label', 'Choose audio files');
   dropHint.textContent = 'tap to choose a file · or drag & drop';
   if (pendingSharedFile) {
     handleFiles([pendingSharedFile]);
@@ -134,12 +147,19 @@ function showCompat(msg) {
 }
 
 // ── File input wiring ────────────────────────────────────────────────────────
+// Before a model is loaded the drop zone acts as the "load model" trigger, so
+// the most prominent element on screen does something useful when tapped.
 dropZone.addEventListener('click', () => {
   if (modelReady) fileInput.click();
+  else checkWasmSupport();
 });
 
 dropZone.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ' ') && modelReady) fileInput.click();
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (modelReady) fileInput.click();
+    else checkWasmSupport();
+  }
 });
 
 fileInput.addEventListener('change', () => {
@@ -148,7 +168,6 @@ fileInput.addEventListener('change', () => {
 });
 
 dropZone.addEventListener('dragover', e => {
-  if (!modelReady) return;
   e.preventDefault();
   dropZone.classList.add('drag-over');
 });
@@ -158,9 +177,15 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  if (!modelReady) return;
   const file = [...e.dataTransfer.files].find(isAudio);
-  if (file) handleFiles([file]);
+  if (!file) return;
+  if (modelReady) {
+    handleFiles([file]);
+  } else {
+    // Stash the file and load the model; enableDropZone() picks it up once ready.
+    pendingSharedFile = file;
+    checkWasmSupport();
+  }
 });
 
 function isAudio(file) {
