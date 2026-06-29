@@ -86,12 +86,31 @@ if (location.search.includes('shared=1') || sessionStorage.getItem('share-pendin
 // ── Model initialization ─────────────────────────────────────────────────────
 btnLoadModel.addEventListener('click', checkWasmSupport);
 
+// Detects WebAssembly fixed-width SIMD by validating a module that uses an
+// i32x4 SIMD opcode (the canonical wasm-feature-detect probe). onnxruntime-web
+// (via Transformers.js v3) dropped its non-SIMD build as of v1.19.0, so SIMD is
+// a hard requirement — Safari only gained it in 16.4 / iOS 16.4.
+function wasmSimdSupported() {
+  try {
+    return WebAssembly.validate(new Uint8Array([
+      0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0,
+      10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11,
+    ]));
+  } catch {
+    return false;
+  }
+}
+
 async function checkWasmSupport() {
   try {
     // Quick WASM availability check
     await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
   } catch {
-    showCompat('Your browser does not support WebAssembly, which is required for on-device transcription. Try Chrome, Firefox, or Safari 15+.');
+    showCompat('Your browser does not support WebAssembly, which is required for on-device transcription. Try Chrome, Firefox, or Safari 16.4+.');
+    return;
+  }
+  if (!wasmSimdSupported()) {
+    showCompat('Your browser is missing WebAssembly SIMD, which the speech model requires. On Safari, update to version 16.4 or newer (iOS 16.4+), or use a recent Chrome or Firefox. (If you are using Edge in Enhanced Security Mode, disabling it for this site also resolves the issue.)');
     return;
   }
   initModel();
@@ -129,6 +148,9 @@ function enableDropZone() {
 }
 
 function showCompat(msg) {
+  // Hide the load control so users can't start a multi-hundred-MB download that
+  // is guaranteed to fail on this browser.
+  modelPick.hidden = true;
   compatSection.hidden = false;
   compatMessage.textContent = msg;
 }
