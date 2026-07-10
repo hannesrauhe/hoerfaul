@@ -1,5 +1,7 @@
 # Hörfaul
 
+Hosted on [Github-Pages](https://hannesrauhe.github.io/hoerfaul/)
+
 Drop voice message files (WhatsApp `.opus`, `.m4a`, or any common audio format) and get a plain-text transcript. Everything runs in the browser — no backend, no cloud, no API keys required.
 
 Transcription is performed by [OpenAI Whisper](https://openai.com/research/whisper) compiled to WebAssembly via [Transformers.js](https://huggingface.co/docs/transformers.js). Audio never leaves the device.
