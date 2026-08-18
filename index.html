@@ -37,6 +37,10 @@
           <option value="japanese">日本語</option>
           <option value="chinese">中文</option>
         </select>
+        <select id="quality-select" aria-label="Model accuracy" hidden>
+          <option value="base" selected>Standard</option>
+          <option value="small">Higher accuracy</option>
+        </select>
         <button id="btn-load-model" class="btn btn-primary">Load model</button>
       </div>
       <p id="model-label" class="model-status" hidden></p>
