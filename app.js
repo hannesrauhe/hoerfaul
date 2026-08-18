@@ -1,16 +1,17 @@
 // ── Model config ─────────────────────────────────────────────────────────────
 const MODELS = {
-  german: { label: 'German fine-tune', id: 'onnx-community/whisper-large-v3-turbo-german-ONNX', dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' } },
-  tiny:   { label: 'Whisper Tiny',     id: 'onnx-community/whisper-tiny',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
-  base:   { label: 'Whisper Base',     id: 'onnx-community/whisper-base',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
-  small:  { label: 'Whisper Small',    id: 'onnx-community/whisper-small',                       dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
+  german: { label: 'German fine-tune (large-v3-turbo)', size: '~250 MB', id: 'onnx-community/whisper-large-v3-turbo-german-ONNX', dtype: { encoder_model: 'q8', decoder_model_merged: 'q4' } },
+  base:   { label: 'Whisper Base',                      size: '~110 MB', id: 'onnx-community/whisper-base',                        dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
 };
+
+// German gets the fine-tuned model; every other language uses the base model.
+function modelKeyFor(lang) {
+  return lang === 'german' ? 'german' : 'base';
+}
 
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const modelSection  = document.getElementById('model-section');
-const modelPick     = document.getElementById('model-pick');
 const modelProgress = document.getElementById('model-progress');
-const modelSelectEl = document.getElementById('model-select');
 const btnLoadModel  = document.getElementById('btn-load-model');
 const modelLabel    = document.getElementById('model-label');
 const modelDetail   = document.getElementById('model-detail');
@@ -36,11 +37,15 @@ worker.addEventListener('message', ({ data }) => {
       modelProgress.hidden = true;
       modelLabel.textContent = 'Model loaded';
       modelReady = true;
+      langSelect.disabled = false;
       enableDropZone();
       break;
     case 'model-error':
       modelProgress.hidden = true;
       modelLabel.textContent = `Failed to load model: ${data.message}`;
+      loadedModelKey = null;
+      langSelect.disabled = false;
+      btnLoadModel.hidden = false;
       break;
   }
 });
@@ -84,7 +89,28 @@ if (location.search.includes('shared=1') || sessionStorage.getItem('share-pendin
 }
 
 // ── Model initialization ─────────────────────────────────────────────────────
+let loadedModelKey = null;  // key into MODELS once a load has started
+
 btnLoadModel.addEventListener('click', checkWasmSupport);
+
+updateModelHint();
+langSelect.addEventListener('change', () => {
+  if (loadedModelKey === null) {
+    updateModelHint();
+    return;
+  }
+  // Switching between German and any other language requires a different model.
+  if (modelKeyFor(langSelect.value) !== loadedModelKey) {
+    disableDropZone();
+    initModel();
+  }
+});
+
+function updateModelHint() {
+  const model = MODELS[modelKeyFor(langSelect.value)];
+  modelLabel.hidden = false;
+  modelLabel.textContent = `Model: ${model.label} · ${model.size}`;
+}
 
 async function checkWasmSupport() {
   try {
@@ -98,11 +124,16 @@ async function checkWasmSupport() {
 }
 
 function initModel() {
-  const model = MODELS[modelSelectEl.value] ?? MODELS.german;
-  modelPick.hidden = true;
+  const key = modelKeyFor(langSelect.value);
+  const model = MODELS[key];
+  loadedModelKey = key;
+  modelReady = false;
+  btnLoadModel.hidden = true;
+  langSelect.disabled = true;
   modelLabel.hidden = false;
-  modelLabel.textContent = `Loading ${model.label}…`;
+  modelLabel.textContent = `Loading ${model.label} (${model.size})…`;
   modelProgress.hidden = false;
+  progressFill.style.width = '0%';
   worker.postMessage({ type: 'load', modelId: model.id, dtype: model.dtype });
 }
 
@@ -126,6 +157,12 @@ function enableDropZone() {
     handleFiles([pendingSharedFile]);
     pendingSharedFile = null;
   }
+}
+
+function disableDropZone() {
+  dropZone.classList.remove('ready');
+  dropZone.setAttribute('aria-disabled', 'true');
+  dropHint.textContent = 'Load the model above to begin';
 }
 
 function showCompat(msg) {

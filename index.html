@@ -19,12 +19,23 @@
     </header>
 
     <section id="model-section" class="model-section">
-      <div id="model-pick" class="model-pick">
-        <select id="model-select" aria-label="Speech recognition model">
-          <option value="german" selected>German fine-tune (large-v3-turbo) · ~250 MB</option>
-          <option value="tiny">Whisper Tiny · ~60 MB</option>
-          <option value="base">Whisper Base · ~110 MB</option>
-          <option value="small">Whisper Small · ~310 MB</option>
+      <div id="model-pick" class="settings-row model-pick">
+        <label for="lang-select">Language</label>
+        <select id="lang-select">
+          <option value="german" selected>Deutsch</option>
+          <option value="">Auto-detect</option>
+          <option value="english">English</option>
+          <option value="french">Français</option>
+          <option value="spanish">Español</option>
+          <option value="italian">Italiano</option>
+          <option value="dutch">Nederlands</option>
+          <option value="polish">Polski</option>
+          <option value="portuguese">Português</option>
+          <option value="russian">Русский</option>
+          <option value="turkish">Türkçe</option>
+          <option value="arabic">العربية</option>
+          <option value="japanese">日本語</option>
+          <option value="chinese">中文</option>
         </select>
         <button id="btn-load-model" class="btn btn-primary">Load model</button>
       </div>
@@ -49,28 +60,8 @@
         <polyline points="2 12 5 12 5 8 8 8 8 16 11 16 11 4 14 4 14 20 17 20 17 12 20 12 22 12"/>
       </svg>
       <p class="drop-label">Drop a voice message here</p>
-      <p class="drop-hint" id="drop-hint">Choose a model above to begin</p>
+      <p class="drop-hint" id="drop-hint">Load the model above to begin</p>
       <input id="file-input" type="file" accept="audio/*" hidden>
-    </div>
-
-    <div class="settings-row">
-      <label for="lang-select">Language</label>
-      <select id="lang-select">
-        <option value="german" selected>Deutsch</option>
-        <option value="">Auto-detect</option>
-        <option value="english">English</option>
-        <option value="french">Français</option>
-        <option value="spanish">Español</option>
-        <option value="italian">Italiano</option>
-        <option value="dutch">Nederlands</option>
-        <option value="polish">Polski</option>
-        <option value="portuguese">Português</option>
-        <option value="russian">Русский</option>
-        <option value="turkish">Türkçe</option>
-        <option value="arabic">العربية</option>
-        <option value="japanese">日本語</option>
-        <option value="chinese">中文</option>
-      </select>
     </div>
 
     <section id="queue" class="queue" aria-label="Transcriptions" aria-live="polite"></section>
