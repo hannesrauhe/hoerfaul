@@ -178,6 +178,31 @@ select {
   opacity: 0.6;
 }
 @keyframes blink { 50% { opacity: 0; } }
+.summary {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.6;
+}
+.btn-summarize {
+  display: inline-block;
+  margin-top: 0.6rem;
+  margin-right: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-summarize:hover { color: var(--text); border-color: var(--muted); }
+.btn-summarize:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-text { color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
 .status-text.error { color: var(--danger); }
 
