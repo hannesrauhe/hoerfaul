@@ -55,6 +55,8 @@ h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
 .model-pick { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .model-pick select { flex: 1; min-width: 0; }
 .model-status { font-size: 0.9rem; color: var(--muted); }
+.model-note.warn { color: var(--danger); }
+.model-note.ok { color: #16a34a; }
 
 .progress-track {
   height: 4px;
@@ -90,17 +92,14 @@ h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
   border-radius: var(--radius);
   padding: 2.5rem 1.5rem;
   text-align: center;
-  cursor: wait;
+  cursor: pointer;
+  border-color: var(--accent);
   transition: border-color 0.2s, background 0.2s;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
-.drop-zone.ready {
-  border-color: var(--accent);
-  cursor: pointer;
-}
-.drop-zone.ready:hover,
-.drop-zone.ready:focus-visible {
+.drop-zone:hover,
+.drop-zone:focus-visible {
   background: color-mix(in srgb, var(--accent) 5%, transparent);
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -117,7 +116,6 @@ h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
   margin-bottom: 0.75rem;
   opacity: 0.7;
 }
-.drop-zone:not(.ready) .drop-icon { color: var(--muted); }
 
 .drop-label { font-weight: 600; margin-bottom: 0.25rem; }
 .drop-hint { font-size: 0.85rem; color: var(--muted); }
@@ -154,6 +152,8 @@ select {
   border-radius: var(--radius);
   padding: 1rem;
 }
+.card.done { border-left: 3px solid #16a34a; }
+.card.done .card-name::before { content: '✓ '; color: #16a34a; font-weight: 700; }
 .card-header {
   display: flex;
   align-items: center;
@@ -178,6 +178,9 @@ select {
   opacity: 0.6;
 }
 @keyframes blink { 50% { opacity: 0; } }
+.card-status { margin-top: 0.5rem; font-size: 0.8rem; }
+.card-status.success { color: #16a34a; }
+.card-status.failure { color: var(--danger); }
 .summary {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;
@@ -203,6 +206,17 @@ select {
 }
 .btn-summarize:hover { color: var(--text); border-color: var(--muted); }
 .btn-summarize:disabled { opacity: 0.5; cursor: not-allowed; }
+.badge-experimental {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid #d97706;
+  border-radius: 99px;
+  color: #d97706;
+}
 .status-text { color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
 .status-text.error { color: var(--danger); }
 
