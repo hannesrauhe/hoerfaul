@@ -94,6 +94,7 @@ let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
 let startRequested = false;   // Start was pressed while the model was still loading
+let hintToken = 0;            // guards against a stale cache lookup overwriting a newer hint
 
 // ── Restore saved transcripts from previous session ──────────────────────────
 let savedTranscripts = loadSaved();
@@ -166,7 +167,6 @@ function onSelectionChange() {
   // Start reloads the model if the key no longer matches.
 }
 
-let hintToken = 0;  // guards against a stale cache lookup overwriting a newer hint
 async function updateModelHint() {
   const key = modelKeyFor(langSelect.value, qualitySelect.value);
   const model = MODELS[key];
