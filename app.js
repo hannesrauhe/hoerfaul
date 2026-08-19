@@ -293,7 +293,10 @@ function makeSummBtn(modelKey, label) {
   const btn = document.createElement('button');
   btn.className = 'btn-summarize';
   btn.dataset.model = modelKey;
-  btn.textContent = label;
+  const badge = document.createElement('span');
+  badge.className = 'badge-experimental';
+  badge.textContent = 'experimental';
+  btn.append(label, badge);
   return btn;
 }
 
@@ -553,8 +556,7 @@ queueEl.addEventListener('click', async e => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(savedTranscripts));
     }
   } catch (err) {
-    btn.textContent = 'Summarize';
-    btn.disabled = false;
+    btn.replaceWith(makeSummBtn(modelKey, 'Summarize'));  // restores label + badge
     showToast('Summarization failed');
     console.error(err);
   }
