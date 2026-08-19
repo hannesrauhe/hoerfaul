@@ -14,7 +14,21 @@ const SUMM_MODELS = {
 
 let webgpuAvailable = false;
 if (navigator.gpu) {
-  navigator.gpu.requestAdapter().then(adapter => { webgpuAvailable = !!adapter; });
+  navigator.gpu.requestAdapter().then(adapter => {
+    webgpuAvailable = !!adapter;
+    // Cards restored from localStorage render before this resolves; retrofit
+    // the Summarize button on finished cards that don't have a summary yet.
+    if (webgpuAvailable) {
+      for (const { body } of cards.values()) {
+        if (body.querySelector('.transcript') &&
+            !body.querySelector('.transcript.streaming') &&
+            !body.querySelector('.summary') &&
+            !body.querySelector('.btn-summarize')) {
+          body.appendChild(makeSummBtn('gemma4', 'Summarize'));
+        }
+      }
+    }
+  });
 }
 
 const SUMM_PROMPTS = {
