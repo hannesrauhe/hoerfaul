@@ -19,6 +19,22 @@
       <p class="subtitle">On-device voice message transcription</p>
     </header>
 
+    <section id="compat-section" class="compat-warning" hidden>
+      <p id="compat-message"></p>
+    </section>
+
+    <div id="drop-zone" class="drop-zone" role="button" tabindex="0"
+         aria-label="Choose audio files" aria-disabled="false">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+           aria-hidden="true">
+        <polyline points="2 12 5 12 5 8 8 8 8 16 11 16 11 4 14 4 14 20 17 20 17 12 20 12 22 12"/>
+      </svg>
+      <p class="drop-label">Drop a voice message here</p>
+      <p class="drop-hint" id="drop-hint">tap to choose a file · or drag & drop</p>
+      <input id="file-input" type="file" accept="audio/*" hidden>
+    </div>
+
     <section id="model-section" class="model-section">
       <div id="model-pick" class="settings-row model-pick">
         <label for="lang-select">Language</label>
@@ -42,7 +58,7 @@
           <option value="base" selected>Standard</option>
           <option value="small">Higher accuracy</option>
         </select>
-        <button id="btn-load-model" class="btn btn-primary">Load model</button>
+        <button id="btn-start" class="btn btn-primary" disabled>Start</button>
       </div>
       <p id="model-label" class="model-status" hidden></p>
       <div id="model-progress" hidden>
@@ -52,22 +68,6 @@
         <p id="model-detail" class="model-detail"></p>
       </div>
     </section>
-
-    <section id="compat-section" class="compat-warning" hidden>
-      <p id="compat-message"></p>
-    </section>
-
-    <div id="drop-zone" class="drop-zone" role="button" tabindex="0"
-         aria-label="Choose audio files" aria-disabled="true">
-      <svg class="drop-icon" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-           aria-hidden="true">
-        <polyline points="2 12 5 12 5 8 8 8 8 16 11 16 11 4 14 4 14 20 17 20 17 12 20 12 22 12"/>
-      </svg>
-      <p class="drop-label">Drop a voice message here</p>
-      <p class="drop-hint" id="drop-hint">Load the model above to begin</p>
-      <input id="file-input" type="file" accept="audio/*" hidden>
-    </div>
 
     <section id="queue" class="queue" aria-label="Transcriptions" aria-live="polite"></section>
 

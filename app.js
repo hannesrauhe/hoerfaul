@@ -40,14 +40,13 @@ function modelKeyFor(lang, quality) {
 // ── DOM refs ────────────────────────────────────────────────────────────────
 const modelSection  = document.getElementById('model-section');
 const modelProgress = document.getElementById('model-progress');
-const btnLoadModel  = document.getElementById('btn-load-model');
+const btnStart      = document.getElementById('btn-start');
 const modelLabel    = document.getElementById('model-label');
 const modelDetail   = document.getElementById('model-detail');
 const progressFill  = document.getElementById('progress-fill');
 const compatSection = document.getElementById('compat-section');
 const compatMessage = document.getElementById('compat-message');
 const dropZone      = document.getElementById('drop-zone');
-const dropHint      = document.getElementById('drop-hint');
 const fileInput     = document.getElementById('file-input');
 const queueEl       = document.getElementById('queue');
 const toolbar       = document.getElementById('toolbar');
@@ -68,15 +67,21 @@ worker.addEventListener('message', ({ data }) => {
       modelReady = true;
       langSelect.disabled = false;
       qualitySelect.disabled = false;
-      enableDropZone();
+      if (startRequested) {
+        startRequested = false;
+        drainQueue();
+      }
+      updateStartButton();
       break;
     case 'model-error':
       modelProgress.hidden = true;
       modelLabel.textContent = `Failed to load model: ${data.message}`;
       loadedModelKey = null;
+      startRequested = false;
       langSelect.disabled = false;
       qualitySelect.disabled = false;
-      btnLoadModel.hidden = false;
+      setPendingCards('queued');  // Start acts as retry
+      updateStartButton();
       break;
   }
 });
@@ -88,7 +93,7 @@ const summarizers = new Map(); // modelKey → loaded pipeline
 let processing  = false;
 const pending   = [];
 const cards     = new Map();  // fileKey → <article> element
-let pendingSharedFile = null; // file received via Web Share Target, queued until model ready
+let startRequested = false;   // Start was pressed while the model was still loading
 
 // ── Restore saved transcripts from previous session ──────────────────────────
 let savedTranscripts = loadSaved();
@@ -112,8 +117,9 @@ if (location.search.includes('shared=1') || sessionStorage.getItem('share-pendin
       await cache.delete('shared-file');
       const blob = await response.blob();
       const name = decodeURIComponent(response.headers.get('X-File-Name') || 'shared-audio');
-      pendingSharedFile = new File([blob], name, { type: blob.type });
-      checkWasmSupport();  // auto-load when a file arrives via share target
+      // Queue the shared file like a dropped one; the user picks a language
+      // and presses Start, identical to the in-app flow.
+      handleFiles([new File([blob], name, { type: blob.type })]);
     } catch (err) {
       console.error('Failed to retrieve shared file:', err);
     }
@@ -123,7 +129,30 @@ if (location.search.includes('shared=1') || sessionStorage.getItem('share-pendin
 // ── Model initialization ─────────────────────────────────────────────────────
 let loadedModelKey = null;  // key into MODELS once a load has started
 
-btnLoadModel.addEventListener('click', checkWasmSupport);
+btnStart.addEventListener('click', onStart);
+
+function onStart() {
+  if (pending.length === 0 || processing) return;
+  if (!modelReady || loadedModelKey !== modelKeyFor(langSelect.value, qualitySelect.value)) {
+    startRequested = true;
+    setPendingCards('loading-model');
+    updateStartButton();
+    checkWasmSupport();
+  } else {
+    drainQueue();
+  }
+}
+
+function updateStartButton() {
+  btnStart.disabled = pending.length === 0 || processing || startRequested;
+}
+
+function setPendingCards(state, detail) {
+  for (const { id } of pending) {
+    const entry = cards.get(id);
+    if (entry) setCardBody(entry.body, state, detail);
+  }
+}
 
 updateModelHint();
 langSelect.addEventListener('change', onSelectionChange);
@@ -132,15 +161,9 @@ qualitySelect.addEventListener('change', onSelectionChange);
 function onSelectionChange() {
   // The size choice has no effect for German (always the fine-tune), so hide it.
   qualitySelect.hidden = langSelect.value === 'german';
-  if (loadedModelKey === null) {
-    updateModelHint();
-    return;
-  }
-  // A selection that maps to a different model requires a reload.
-  if (modelKeyFor(langSelect.value, qualitySelect.value) !== loadedModelKey) {
-    disableDropZone();
-    initModel();
-  }
+  updateModelHint();
+  // A selection that maps to a different model is resolved lazily: the next
+  // Start reloads the model if the key no longer matches.
 }
 
 function updateModelHint() {
@@ -155,6 +178,8 @@ async function checkWasmSupport() {
     await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
   } catch {
     showCompat('Your browser does not support WebAssembly, which is required for on-device transcription. Try Chrome, Firefox, or Safari 15+.');
+    startRequested = false;
+    setPendingCards('error', 'WebAssembly not supported');
     return;
   }
   initModel();
@@ -165,7 +190,6 @@ function initModel() {
   const model = MODELS[key];
   loadedModelKey = key;
   modelReady = false;
-  btnLoadModel.hidden = true;
   langSelect.disabled = true;
   qualitySelect.disabled = true;
   modelLabel.hidden = false;
@@ -185,22 +209,6 @@ function onModelProgress(info) {
   } else if (info.status === 'ready') {
     progressFill.style.width = '100%';
   }
-}
-
-function enableDropZone() {
-  dropZone.classList.add('ready');
-  dropZone.setAttribute('aria-disabled', 'false');
-  dropHint.textContent = 'tap to choose a file · or drag & drop';
-  if (pendingSharedFile) {
-    handleFiles([pendingSharedFile]);
-    pendingSharedFile = null;
-  }
-}
-
-function disableDropZone() {
-  dropZone.classList.remove('ready');
-  dropZone.setAttribute('aria-disabled', 'true');
-  dropHint.textContent = 'Load the model above to begin';
 }
 
 function showCompat(msg) {
@@ -245,12 +253,10 @@ function makeSummBtn(modelKey, label) {
 }
 
 // ── File input wiring ────────────────────────────────────────────────────────
-dropZone.addEventListener('click', () => {
-  if (modelReady) fileInput.click();
-});
+dropZone.addEventListener('click', () => fileInput.click());
 
 dropZone.addEventListener('keydown', e => {
-  if ((e.key === 'Enter' || e.key === ' ') && modelReady) fileInput.click();
+  if (e.key === 'Enter' || e.key === ' ') fileInput.click();
 });
 
 fileInput.addEventListener('change', () => {
@@ -259,7 +265,6 @@ fileInput.addEventListener('change', () => {
 });
 
 dropZone.addEventListener('dragover', e => {
-  if (!modelReady) return;
   e.preventDefault();
   dropZone.classList.add('drag-over');
 });
@@ -269,7 +274,6 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  if (!modelReady) return;
   const file = [...e.dataTransfer.files].find(isAudio);
   if (file) handleFiles([file]);
 });
@@ -292,7 +296,13 @@ function handleFiles(files) {
   pending.push({ file, id });
   addCard(id, file.name, null);
   toolbar.hidden = false;
-  drainQueue();
+  // While a run is active the drainQueue loop picks up new items on its own;
+  // otherwise the user starts (or restarts) via the Start button.
+  if (processing || startRequested) {
+    const entry = cards.get(id);
+    setCardBody(entry.body, startRequested ? 'loading-model' : 'waiting');
+  }
+  updateStartButton();
 }
 
 function fileKey(file) {
@@ -302,11 +312,18 @@ function fileKey(file) {
 async function drainQueue() {
   if (processing) return;
   processing = true;
+  langSelect.disabled = true;
+  qualitySelect.disabled = true;
+  updateStartButton();
+  setPendingCards('waiting');
   while (pending.length > 0) {
     const { file, id } = pending.shift();
     await transcribeFile(file, id);
   }
   processing = false;
+  langSelect.disabled = false;
+  qualitySelect.disabled = false;
+  updateStartButton();
 }
 
 async function decodeAudio(file) {
@@ -399,7 +416,7 @@ function addCard(id, name, text, summary) {
   card.appendChild(body);
 
   cards.set(id, { card, body });
-  queueEl.appendChild(card);
+  queueEl.prepend(card);
 
   setCardBody(body, text !== null ? 'done' : 'queued', text ?? undefined);
   if (text !== null && summary) appendSummary(body, summary);
@@ -408,12 +425,19 @@ function addCard(id, name, text, summary) {
 function setCardBody(body, state, detail) {
   const p = document.createElement('p');
   switch (state) {
-    case 'queued':
+    case 'queued': {
+      p.className = 'status-text';
+      p.textContent = 'Ready — press Start';
+      break;
+    }
+    case 'loading-model':
+    case 'waiting':
     case 'working': {
       p.className = 'status-text';
       const spinner = document.createElement('span');
       spinner.className = 'spinner';
-      p.append(spinner, state === 'queued' ? ' Waiting…' : ' Transcribing…');
+      const label = { 'loading-model': ' Loading model…', waiting: ' Waiting…', working: ' Transcribing…' }[state];
+      p.append(spinner, label);
       break;
     }
     case 'streaming':
@@ -425,6 +449,7 @@ function setCardBody(body, state, detail) {
       p.textContent = detail;
       const btns = webgpuAvailable ? [makeSummBtn('gemma4', 'Summarize')] : [];
       body.replaceChildren(p, ...btns);
+      body.closest('.card')?.classList.add('done');
       return;
     }
     case 'error':
@@ -480,7 +505,9 @@ queueEl.addEventListener('click', async e => {
 
 // ── Toolbar actions ──────────────────────────────────────────────────────────
 btnCopyAll.addEventListener('click', () => {
+  // Cards render newest-first; reverse for chronological reading order.
   const parts = [...queueEl.querySelectorAll('.transcript')]
+    .reverse()
     .map(el => el.textContent)
     .filter(Boolean);
   if (parts.length) copyText(parts.join('\n\n---\n\n'));
@@ -493,6 +520,7 @@ btnClearAll.addEventListener('click', () => {
   cards.clear();
   toolbar.hidden = true;
   localStorage.removeItem(STORAGE_KEY);
+  updateStartButton();
 });
 
 // ── Clipboard ────────────────────────────────────────────────────────────────
