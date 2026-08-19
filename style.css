@@ -176,6 +176,9 @@ select {
   opacity: 0.6;
 }
 @keyframes blink { 50% { opacity: 0; } }
+.card-status { margin-top: 0.5rem; font-size: 0.8rem; }
+.card-status.success { color: #16a34a; }
+.card-status.failure { color: var(--danger); }
 .summary {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;

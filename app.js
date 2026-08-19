@@ -345,6 +345,7 @@ async function transcribeFile(file, id) {
 
   setCardBody(entry.body, 'working');
 
+  const t0 = performance.now();
   try {
     const audio = await decodeAudio(file);
     const lang = langSelect.value || null;  // empty string = auto-detect
@@ -369,11 +370,15 @@ async function transcribeFile(file, id) {
     });
 
     setCardBody(entry.body, 'done', text);
+    const secs = Math.max(1, Math.round((performance.now() - t0) / 1000));
+    const model = MODELS[loadedModelKey ?? modelKeyFor(langSelect.value, qualitySelect.value)];
+    appendStatus(entry.body, true, `Transcribed with ${model.label} in ${secs}s`);
     if (cards.has(id)) {  // skip if cleared during transcription
       persistTranscript(id, file.name, text);
     }
   } catch (err) {
     setCardBody(entry.body, 'error', err.message);
+    appendStatus(entry.body, false, 'Transcription failed');
     console.error(err);
   }
 }
@@ -458,6 +463,13 @@ function setCardBody(body, state, detail) {
       break;
   }
   body.replaceChildren(p);
+}
+
+function appendStatus(body, ok, message) {
+  const p = document.createElement('p');
+  p.className = `card-status ${ok ? 'success' : 'failure'}`;
+  p.textContent = message;
+  body.appendChild(p);
 }
 
 function appendSummary(body, text) {
