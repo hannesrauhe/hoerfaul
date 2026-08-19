@@ -63,8 +63,8 @@ worker.addEventListener('message', ({ data }) => {
     case 'model-progress': onModelProgress(data.info); break;
     case 'model-ready':
       modelProgress.hidden = true;
-      modelLabel.textContent = 'Model loaded';
       modelReady = true;
+      updateModelHint();
       langSelect.disabled = false;
       qualitySelect.disabled = false;
       if (startRequested) {
@@ -166,10 +166,41 @@ function onSelectionChange() {
   // Start reloads the model if the key no longer matches.
 }
 
-function updateModelHint() {
-  const model = MODELS[modelKeyFor(langSelect.value, qualitySelect.value)];
+let hintToken = 0;  // guards against a stale cache lookup overwriting a newer hint
+async function updateModelHint() {
+  const key = modelKeyFor(langSelect.value, qualitySelect.value);
+  const model = MODELS[key];
+  const token = ++hintToken;
   modelLabel.hidden = false;
   modelLabel.textContent = `Model: ${model.label} · ${model.size}`;
+
+  const note = document.createElement('span');
+  if (modelReady && loadedModelKey === key) {
+    note.className = 'model-note ok';
+    note.textContent = ' — model loaded, nothing will be downloaded';
+  } else if (await isModelCached(model.id)) {
+    if (token !== hintToken) return;
+    note.className = 'model-note ok';
+    note.textContent = ' — already downloaded, Start loads it from the cache';
+  } else {
+    if (token !== hintToken) return;
+    note.className = 'model-note warn';
+    note.textContent = ` — pressing Start downloads ${model.size}`;
+  }
+  modelLabel.appendChild(note);
+}
+
+// transformers.js stores downloaded model files in Cache Storage; look for any
+// cached request URL that references the model id.
+async function isModelCached(modelId) {
+  try {
+    for (const name of await caches.keys()) {
+      if (!name.includes('transformers')) continue;
+      const keys = await (await caches.open(name)).keys();
+      if (keys.some(req => req.url.includes(modelId))) return true;
+    }
+  } catch { /* Cache Storage unavailable */ }
+  return false;
 }
 
 async function checkWasmSupport() {
