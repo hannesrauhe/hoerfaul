@@ -7,15 +7,33 @@ const MODELS = {
   small:  { label: 'Whisper Small',                     size: '~310 MB', id: 'onnx-community/whisper-small',                       dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' } },
 };
 
-// Gemma 4 E2B requires WebGPU (q4f16); check adapter availability at startup.
+// Summarization requires WebGPU (q4f16); check adapter availability at startup.
+// The model is picked automatically: capable machines get Gemma E2B, weaker
+// hardware (phones, low-memory devices) gets the much smaller Qwen3 0.6B.
 const SUMM_MODELS = {
   gemma4: { label: 'Gemma 4 E2B', id: 'onnx-community/gemma-4-E2B-it-ONNX', device: 'webgpu', dtype: 'q4f16' },
+  qwen3:  { label: 'Qwen3 0.6B',  id: 'onnx-community/Qwen3-0.6B-ONNX',     device: 'webgpu', dtype: 'q4f16', noThink: true },
 };
 
+const GiB = 1024 ** 3;
+
+// Gemma E2B needs roughly 3 GB of memory at q4f16; anything that looks like a
+// phone or a low-memory/weak-GPU device gets the light model instead.
+function pickSummModel(adapter) {
+  const mobile = navigator.userAgentData?.mobile ?? /Android|Mobile|iPhone|iPad/i.test(navigator.userAgent);
+  if (mobile) return 'qwen3';
+  if (navigator.deviceMemory && navigator.deviceMemory < 8) return 'qwen3';
+  const limits = adapter?.limits;
+  if (limits && (limits.maxStorageBufferBindingSize < 2 * GiB || limits.maxBufferSize < 4 * GiB)) return 'qwen3';
+  return 'gemma4';
+}
+
 let webgpuAvailable = false;
+let summModelKey = 'qwen3';  // safe default until the adapter probe resolves
 if (navigator.gpu) {
   navigator.gpu.requestAdapter().then(adapter => {
     webgpuAvailable = !!adapter;
+    summModelKey = pickSummModel(adapter);
     // Cards restored from localStorage render before this resolves; retrofit
     // the Summarize button on finished cards that don't have a summary yet.
     if (webgpuAvailable) {
@@ -24,7 +42,7 @@ if (navigator.gpu) {
             !body.querySelector('.transcript.streaming') &&
             !body.querySelector('.summary') &&
             !body.querySelector('.btn-summarize')) {
-          body.appendChild(makeSummBtn('gemma4', 'Summarize'));
+          body.appendChild(makeSummBtn(summModelKey, 'Summarize'));
         }
       }
     }
@@ -280,13 +298,18 @@ async function ensureSummarizer(modelKey, onStatus) {
   return pipe;
 }
 
-async function summarizeText(pipe, text, lang) {
-  const prompt = (SUMM_PROMPTS[lang] ?? SUMM_PROMPTS.english) + text;
+async function summarizeText(pipe, text, lang, model) {
+  let prompt = (SUMM_PROMPTS[lang] ?? SUMM_PROMPTS.english) + text;
+  // Qwen3 is a hybrid reasoning model; the /no_think soft switch disables
+  // reasoning so the output is just the summary.
+  if (model.noThink) prompt += ' /no_think';
   const output = await pipe(
     [{ role: 'user', content: prompt }],
     { max_new_tokens: 200, do_sample: false }
   );
-  return output[0].generated_text.at(-1).content.trim();
+  let result = output[0].generated_text.at(-1).content;
+  if (model.noThink) result = result.replace(/<think>[\s\S]*?<\/think>/, '');
+  return result.trim();
 }
 
 function makeSummBtn(modelKey, label) {
@@ -500,7 +523,7 @@ function setCardBody(body, state, detail) {
     case 'done': {
       p.className = 'transcript';
       p.textContent = detail;
-      const btns = webgpuAvailable ? [makeSummBtn('gemma4', 'Summarize')] : [];
+      const btns = webgpuAvailable ? [makeSummBtn(summModelKey, 'Summarize')] : [];
       body.replaceChildren(p, ...btns);
       body.closest('.card')?.classList.add('done');
       return;
@@ -548,7 +571,7 @@ queueEl.addEventListener('click', async e => {
   try {
     const pipe = await ensureSummarizer(modelKey, msg => { btn.textContent = msg; });
     btn.textContent = 'Summarizing…';
-    const summary = await summarizeText(pipe, transcript, langSelect.value);
+    const summary = await summarizeText(pipe, transcript, langSelect.value, SUMM_MODELS[modelKey]);
     appendSummary(entry.body, summary);
     const saved = savedTranscripts.find(t => t.id === id);
     if (saved) {
